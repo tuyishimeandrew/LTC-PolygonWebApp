@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import geopandas as gpd
 from shapely.geometry import Polygon
 
 def parse_polygon_z(polygon_str):
@@ -18,35 +19,31 @@ def parse_polygon_z(polygon_str):
         if len(coords) < 3:
             continue
         try:
-            # Convert first three values to float, use x and y for the polygon
+            # Convert the first three values to float and use x and y
             x, y, _ = map(float, coords[:3])
             vertices.append((x, y))
         except ValueError:
             continue
     return Polygon(vertices) if len(vertices) >= 3 else None
 
-def check_overlaps(df, target_code):
+def check_overlaps(gdf, target_code):
     """
-    For the given target_code, find all other polygons in the DataFrame
+    For the given target_code, find all other polygons in the GeoDataFrame
     that overlap with the target polygon. Returns a list of dictionaries
     containing the overlapping farmer code, the overlap area, and the
     total area of the target polygon.
     """
-    target_row = df[df['Farmercode'] == target_code]
+    target_row = gdf[gdf['Farmercode'] == target_code]
     if target_row.empty:
-        return []  # No matching farmer code found
-    target_poly = target_row['polygon_z'].iloc[0]
-    if target_poly is None:
         return []
-    
+    target_poly = target_row['geometry'].iloc[0]
     overlaps = []
-    for _, row in df.iterrows():
+    for _, row in gdf.iterrows():
         if row['Farmercode'] == target_code:
             continue
-        other_poly = row['polygon_z']
+        other_poly = row['geometry']
         if other_poly and target_poly.intersects(other_poly):
             intersection = target_poly.intersection(other_poly)
-            # Compute overlap area; if no actual overlapping area, it will be zero
             overlap_area = intersection.area if not intersection.is_empty else 0
             overlaps.append({
                 'Farmercode': row['Farmercode'],
@@ -54,10 +51,6 @@ def check_overlaps(df, target_code):
                 'total_area': target_poly.area
             })
     return overlaps
-
-# -------------------------
-# Streamlit App Interface
-# -------------------------
 
 st.title("Polygon Overlap Checker")
 
@@ -73,7 +66,7 @@ if uploaded_file is not None:
         st.error("Error loading file: " + str(e))
         st.stop()
     
-    # Check that required columns exist
+    # Check for required columns
     if 'polygonplot' not in df.columns or 'Farmercode' not in df.columns:
         st.error("The uploaded file must contain 'polygonplot' and 'Farmercode' columns.")
         st.stop()
@@ -81,8 +74,18 @@ if uploaded_file is not None:
     # Parse the polygon data from the 'polygonplot' column
     df['polygon_z'] = df['polygonplot'].apply(parse_polygon_z)
     
-    # Get the list of unique Farmercodes (ignoring any missing values)
-    farmer_codes = df['Farmercode'].dropna().unique().tolist()
+    # Create a GeoDataFrame from the parsed data. Here we assume the original data
+    # is in lat/lon (EPSG:4326). Adjust this if your data is already in another CRS.
+    gdf = gpd.GeoDataFrame(df, geometry='polygon_z', crs='EPSG:4326')
+    
+    # Reproject the geometries to Uganda's National Grid (EPSG:2109)
+    # so that area calculations (in square meters) are accurate.
+    gdf = gdf.to_crs('EPSG:2109')
+    
+    # Use the reprojected geometries for further calculations.
+    # The 'geometry' column now holds the transformed polygon.
+    
+    farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
     if not farmer_codes:
         st.error("No Farmer codes found in the uploaded file.")
         st.stop()
@@ -90,12 +93,11 @@ if uploaded_file is not None:
     selected_code = st.selectbox("Select Farmer Code", farmer_codes)
     
     if st.button("Check Overlaps"):
-        results = check_overlaps(df, selected_code)
+        results = check_overlaps(gdf, selected_code)
         
         if results:
             st.subheader("Overlap Results:")
             for result in results:
-                # Calculate percentage of the target area that overlaps
                 percentage = (result['overlap_area'] / result['total_area']) * 100 if result['total_area'] else 0
                 st.write(f"**Farmer {result['Farmercode']}**:")
                 st.write(f"- Overlap Area: {result['overlap_area']:.2f} m²")
