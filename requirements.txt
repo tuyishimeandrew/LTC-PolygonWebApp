@@ -2,3 +2,4 @@ streamlit
 pandas
 shapely
 openpyxl
+geopandas
