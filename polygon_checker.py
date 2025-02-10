@@ -19,7 +19,6 @@ def parse_polygon_z(polygon_str):
         if len(coords) < 3:
             continue
         try:
-            # Extract x, y (ignore z) from the point string.
             x, y, _ = map(float, coords[:3])
             vertices.append((x, y))
         except ValueError:
@@ -36,7 +35,6 @@ def check_overlaps(gdf, target_code):
     target_row = gdf[gdf['Farmercode'] == target_code]
     if target_row.empty:
         return []
-    # Use the active geometry column.
     target_poly = target_row.geometry.iloc[0]
     overlaps = []
     for _, row in gdf.iterrows():
@@ -67,26 +65,25 @@ if uploaded_file is not None:
         st.error("Error loading file: " + str(e))
         st.stop()
     
-    # Validate that required columns exist.
     if 'polygonplot' not in df.columns or 'Farmercode' not in df.columns:
         st.error("The uploaded file must contain 'polygonplot' and 'Farmercode' columns.")
         st.stop()
     
-    # Parse the polygon data from the 'polygonplot' column.
     df['polygon_z'] = df['polygonplot'].apply(parse_polygon_z)
     
-    # Create a GeoDataFrame using the parsed polygons.
-    # Here we assume the input coordinates are in lat/lon (EPSG:4326).
-    gdf = gpd.GeoDataFrame(df, geometry='polygon_z', crs='EPSG:4326')
+    # Filter out rows with invalid geometries
+    df = df[df['polygon_z'].notna()]
     
-    # Rename the geometry column to "geometry" to ensure that gdf.geometry works.
+    # Create a GeoDataFrame
+    gdf = gpd.GeoDataFrame(df, geometry='polygon_z', crs='EPSG:4326')
     gdf = gdf.rename_geometry('geometry')
     
-    # Reproject the GeoDataFrame to Uganda's National Grid (EPSG:2109)
-    # so that area calculations (in m²) are correct.
+    # Reproject to Uganda's National Grid (EPSG:2109)
     gdf = gdf.to_crs('EPSG:2109')
     
-    # Get the list of unique farmer codes.
+    # Validate geometries
+    gdf = gdf[gdf.is_valid]
+    
     farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
     if not farmer_codes:
         st.error("No Farmer codes found in the uploaded file.")
