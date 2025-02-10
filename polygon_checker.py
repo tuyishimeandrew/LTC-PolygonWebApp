@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 import geopandas as gpd
+import matplotlib.pyplot as plt
 from shapely.geometry import Polygon
 
+# Function to parse polygon data (removes Z-coordinates)
 def parse_polygon_z(polygon_str):
     """
     Parses a string with points in the format "x y z; x y z; ..."
@@ -25,6 +27,7 @@ def parse_polygon_z(polygon_str):
             continue
     return Polygon(vertices) if len(vertices) >= 3 else None
 
+# Function to check overlaps
 def check_overlaps(gdf, target_code):
     """
     For the given target_code, find all other polygons in the GeoDataFrame
@@ -36,23 +39,32 @@ def check_overlaps(gdf, target_code):
     if target_row.empty:
         return []
     target_poly = target_row.geometry.iloc[0]
+
     overlaps = []
     for _, row in gdf.iterrows():
         if row['Farmercode'] == target_code:
             continue
         other_poly = row.geometry
+
         if other_poly and target_poly.intersects(other_poly):
             intersection = target_poly.intersection(other_poly)
             overlap_area = intersection.area if not intersection.is_empty else 0
-            overlaps.append({
-                'Farmercode': row['Farmercode'],
-                'overlap_area': overlap_area,
-                'total_area': target_poly.area
-            })
+
+            # Debugging: Log intersection values
+            st.write(f"Checking {row['Farmercode']} -> Overlap Area: {overlap_area:.4f} m²")
+
+            if overlap_area > 1e-6:  # Ignore tiny overlaps
+                overlaps.append({
+                    'Farmercode': row['Farmercode'],
+                    'overlap_area': overlap_area,
+                    'total_area': target_poly.area
+                })
     return overlaps
 
+# Streamlit App
 st.title("Polygon Overlap Checker")
 
+# File Upload
 uploaded_file = st.file_uploader("Upload CSV or Excel File", type=["xlsx", "csv"])
 
 if uploaded_file is not None:
@@ -64,36 +76,57 @@ if uploaded_file is not None:
     except Exception as e:
         st.error("Error loading file: " + str(e))
         st.stop()
-    
+
+    # Ensure required columns exist
     if 'polygonplot' not in df.columns or 'Farmercode' not in df.columns:
         st.error("The uploaded file must contain 'polygonplot' and 'Farmercode' columns.")
         st.stop()
-    
+
+    # Convert polygon strings to Shapely Polygons
     df['polygon_z'] = df['polygonplot'].apply(parse_polygon_z)
-    
-    # Filter out rows with invalid geometries
+
+    # Remove rows with invalid geometries
     df = df[df['polygon_z'].notna()]
-    
-    # Create a GeoDataFrame
+
+    # Convert to GeoDataFrame
     gdf = gpd.GeoDataFrame(df, geometry='polygon_z', crs='EPSG:4326')
     gdf = gdf.rename_geometry('geometry')
-    
+
     # Reproject to Uganda's National Grid (EPSG:2109)
     gdf = gdf.to_crs('EPSG:2109')
-    
+
+    # Fix invalid geometries
+    gdf['geometry'] = gdf['geometry'].buffer(0)
+
     # Validate geometries
     gdf = gdf[gdf.is_valid]
-    
+
+    # Debugging: Check the CRS
+    st.write(f"Coordinate Reference System: {gdf.crs}")
+
+    # Debugging: Display some geometries
+    st.write("Sample Data:", gdf[['Farmercode', 'geometry']].head())
+
+    # Get unique farmer codes
     farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
     if not farmer_codes:
         st.error("No Farmer codes found in the uploaded file.")
         st.stop()
-    
+
+    # Farmer selection dropdown
     selected_code = st.selectbox("Select Farmer Code", farmer_codes)
-    
+
+    # Visualize polygons
+    st.subheader("Visualizing Farmer Polygons")
+    fig, ax = plt.subplots(figsize=(10, 8))
+    gdf.plot(ax=ax, color='blue', alpha=0.5, edgecolor='black')
+    plt.title("Farmer Plots")
+    st.pyplot(fig)
+
+    # Button to check overlaps
     if st.button("Check Overlaps"):
         results = check_overlaps(gdf, selected_code)
-        
+
         if results:
             st.subheader("Overlap Results:")
             for result in results:
