@@ -42,8 +42,10 @@ def parse_polygon_z(polygon_str):
 
 @st.cache_data
 def load_github_excel(url):
-    """Load an Excel file from a GitHub raw URL."""
-    df = pd.read_excel(url)
+    """
+    Load an Excel file from a GitHub raw URL using openpyxl as the engine.
+    """
+    df = pd.read_excel(url, engine='openpyxl')
     return df
 
 @st.cache_data
@@ -53,13 +55,12 @@ def load_uganda_boundary():
     The file must have a column named 'geometry' with WKT strings.
     Update the URL with your actual GitHub raw link.
     """
-    url = "https://github.com/roadmanquest/LTC-PolygonWebApp/blob/main/UGANDA%20MAP.xlsx"  # UPDATE THIS URL
+    url = "https://raw.githubusercontent.com/yourusername/yourrepository/main/UGANDA%20MAP.xlsx"  # UPDATE THIS URL
     df = load_github_excel(url)
     df['geometry'] = df['geometry'].apply(lambda x: wkt_loads(x) if isinstance(x, str) else None)
     df = df[df['geometry'].notnull()].copy()
     gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
-    # Reproject to Uganda UTM zone (EPSG:32636)
-    gdf = gdf.to_crs(epsg=32636)
+    gdf = gdf.to_crs(epsg=32636)  # Reproject to Uganda UTM (EPSG:32636)
     # Combine all features into a single boundary if needed
     uganda_boundary = unary_union(gdf.geometry.tolist())
     return uganda_boundary
@@ -71,7 +72,7 @@ def load_protected_areas():
     The file must have a column named 'geometry' with WKT strings.
     Update the URL with your actual GitHub raw link.
     """
-    url = "https://github.com/roadmanquest/LTC-PolygonWebApp/blob/main/Uganda%20Game%20Parks.xlsx"  # UPDATE THIS URL
+    url = "https://raw.githubusercontent.com/yourusername/yourrepository/main/Uganda%20Game%20Parks.xlsx"  # UPDATE THIS URL
     df = load_github_excel(url)
     df['geometry'] = df['geometry'].apply(lambda x: wkt_loads(x) if isinstance(x, str) else None)
     df = df[df['geometry'].notnull()].copy()
@@ -93,7 +94,7 @@ def load_main_data(uploaded_file):
     df = df[df['polygon_z'].notnull()].copy()
     # Assume input coordinates are in EPSG:4326 (WGS84)
     gdf = gpd.GeoDataFrame(df, geometry='polygon_z', crs="EPSG:4326")
-    # Reproject to Uganda UTM zone (EPSG:32636) for accurate area and overlap computations
+    # Reproject to Uganda UTM (EPSG:32636) for accurate area and overlap computations
     gdf = gdf.to_crs(epsg=32636)
     return gdf
 
@@ -162,9 +163,9 @@ This app allows you to:
 - **Upload your main dataset** (Excel or CSV) containing polygon data.
 - **Select a Farmercode** to check:
   - Whether the polygon is within Uganda.
-  - The detailed list of overlapping polygons (by Farmercode) with their overlap percentages.
+  - A detailed list of overlapping polygons (by Farmercode) with their individual overlap percentages.
   - The cumulative percentage of the target polygon that is overlapped.
-  - Whether it overlaps any protected areas (Game Parks).
+  - Overlap details with protected areas (Game Parks).
 
 **Dataset requirements:**  
 • A column named **Farmercode** (unique identifier for each polygon).  
@@ -172,7 +173,7 @@ This app allows you to:
 """)
 
 # Upload Main Dataset
-uploaded_file = st.file_uploader("Upload Main Dataset", type=["xlsx", "csv"])
+uploaded_file = st.file_uploader("Upload Main Dataset (CSV or Excel)", type=["xlsx", "csv"])
 
 if uploaded_file is not None:
     gdf_main = load_main_data(uploaded_file)
