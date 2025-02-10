@@ -55,7 +55,7 @@ def load_uganda_boundary():
     The file must have a column named 'geometry' with WKT strings.
     Update the URL with your actual GitHub raw link.
     """
-    url = "https://raw.githubusercontent.com/yourusername/yourrepository/main/UGANDA%20MAP.xlsx"  # UPDATE THIS URL
+    url = "https://github.com/roadmanquest/LTC-PolygonWebApp/blob/main/UGANDA%20MAP.xlsx"  # UPDATE THIS URL
     df = load_github_excel(url)
     df['geometry'] = df['geometry'].apply(lambda x: wkt_loads(x) if isinstance(x, str) else None)
     df = df[df['geometry'].notnull()].copy()
