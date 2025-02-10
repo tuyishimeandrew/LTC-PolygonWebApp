@@ -1,5 +1,9 @@
 streamlit
 pandas
-shapely
-openpyxl
 geopandas
+matplotlib
+shapely
+openpyxl  
+fiona  
+pyproj  
+rtree 
