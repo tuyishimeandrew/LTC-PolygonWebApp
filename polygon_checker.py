@@ -27,19 +27,19 @@ def parse_polygon_z(polygon_str):
     return Polygon(vertices) if len(vertices) >= 3 else None
 
 def check_overlaps(df, target_code):
-    target_poly = df[df['farmer_code'] == target_code]['polygon_z'].iloc[0]
+    target_poly = df[df['Farmercode'] == target_code]['polygon_z'].iloc[0]
     if not target_poly:
         return []
     
     overlaps = []
     for _, row in df.iterrows():
-        if row['farmer_code'] == target_code:
+        if row['Farmercode'] == target_code:
             continue
         other_poly = row['polygon_z']
         if other_poly and target_poly.intersects(other_poly):
             overlap_area = target_poly.intersection(other_poly).area
             overlaps.append({
-                'farmer_code': row['farmer_code'],
+                'Farmercode': row['Farmercode'],
                 'overlap_area': overlap_area,
                 'total_area': target_poly.area
             })
@@ -57,7 +57,7 @@ if uploaded_file:
         df = pd.read_csv(uploaded_file)
     
     df['polygon_z'] = df['polygonplot'].apply(parse_polygon_z)
-    farmer_codes = df['farmer_code'].unique().tolist()
+    farmer_codes = df['Farmercode'].unique().tolist()
     
     selected_code = st.selectbox("Select Farmer Code", farmer_codes)
     
@@ -67,7 +67,7 @@ if uploaded_file:
         if results:
             st.subheader("Overlap Results:")
             for result in results:
-                st.write(f"Farmer {result['farmer_code']}:")
+                st.write(f"Farmer {result['Farmercode']}:")
                 st.write(f"Overlap Area: {result['overlap_area']:.2f} m²")
                 st.write(f"Percentage of Total Area: {(result['overlap_area']/result['total_area'])*100:.2f}%")
                 st.write("---")
