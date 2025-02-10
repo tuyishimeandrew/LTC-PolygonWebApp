@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import geopandas as gpd
-import matplotlib.pyplot as plt
 from shapely.geometry import Polygon
 
 # Function to parse polygon data (removes Z-coordinates)
@@ -108,12 +107,6 @@ if uploaded_file is not None:
     # Validate geometries
     gdf = gdf[gdf.is_valid]
 
-    # Debugging: Check the CRS
-    st.write(f"Coordinate Reference System: {gdf.crs}")
-
-    # Debugging: Display some geometries
-    st.write("Sample Data:", gdf[['Farmercode', 'geometry']].head())
-
     # Get unique farmer codes
     farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
     if not farmer_codes:
@@ -122,13 +115,6 @@ if uploaded_file is not None:
 
     # Farmer selection dropdown
     selected_code = st.selectbox("Select Farmer Code", farmer_codes)
-
-    # Visualize polygons
-    st.subheader("Visualizing Farmer Polygons")
-    fig, ax = plt.subplots(figsize=(10, 8))
-    gdf.plot(ax=ax, color='blue', alpha=0.5, edgecolor='black')
-    plt.title("Farmer Plots")
-    st.pyplot(fig)
 
     # Button to check overlaps
     if st.button("Check Overlaps"):
