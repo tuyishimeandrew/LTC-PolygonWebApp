@@ -19,7 +19,7 @@ def parse_polygon_z(polygon_str):
         if len(coords) < 3:
             continue
         try:
-            # Convert the first three values to float and use x and y
+            # Extract x, y (ignore z) from the point string.
             x, y, _ = map(float, coords[:3])
             vertices.append((x, y))
         except ValueError:
@@ -36,12 +36,13 @@ def check_overlaps(gdf, target_code):
     target_row = gdf[gdf['Farmercode'] == target_code]
     if target_row.empty:
         return []
-    target_poly = target_row['geometry'].iloc[0]
+    # Use the active geometry column.
+    target_poly = target_row.geometry.iloc[0]
     overlaps = []
     for _, row in gdf.iterrows():
         if row['Farmercode'] == target_code:
             continue
-        other_poly = row['geometry']
+        other_poly = row.geometry
         if other_poly and target_poly.intersects(other_poly):
             intersection = target_poly.intersection(other_poly)
             overlap_area = intersection.area if not intersection.is_empty else 0
@@ -66,25 +67,26 @@ if uploaded_file is not None:
         st.error("Error loading file: " + str(e))
         st.stop()
     
-    # Check for required columns
+    # Validate that required columns exist.
     if 'polygonplot' not in df.columns or 'Farmercode' not in df.columns:
         st.error("The uploaded file must contain 'polygonplot' and 'Farmercode' columns.")
         st.stop()
     
-    # Parse the polygon data from the 'polygonplot' column
+    # Parse the polygon data from the 'polygonplot' column.
     df['polygon_z'] = df['polygonplot'].apply(parse_polygon_z)
     
-    # Create a GeoDataFrame from the parsed data. Here we assume the original data
-    # is in lat/lon (EPSG:4326). Adjust this if your data is already in another CRS.
+    # Create a GeoDataFrame using the parsed polygons.
+    # Here we assume the input coordinates are in lat/lon (EPSG:4326).
     gdf = gpd.GeoDataFrame(df, geometry='polygon_z', crs='EPSG:4326')
     
-    # Reproject the geometries to Uganda's National Grid (EPSG:2109)
-    # so that area calculations (in square meters) are accurate.
+    # Rename the geometry column to "geometry" to ensure that gdf.geometry works.
+    gdf = gdf.rename_geometry('geometry')
+    
+    # Reproject the GeoDataFrame to Uganda's National Grid (EPSG:2109)
+    # so that area calculations (in m²) are correct.
     gdf = gdf.to_crs('EPSG:2109')
     
-    # Use the reprojected geometries for further calculations.
-    # The 'geometry' column now holds the transformed polygon.
-    
+    # Get the list of unique farmer codes.
     farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
     if not farmer_codes:
         st.error("No Farmer codes found in the uploaded file.")
