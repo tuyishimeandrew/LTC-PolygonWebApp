@@ -124,12 +124,25 @@ else:
             if col in row and pd.notna(row[col]):
                 poly = parse_polygon_z(row[col])
                 if poly is not None:
+                    # Fix minor issues if the geometry is invalid
+                    if not poly.is_valid:
+                        poly = poly.buffer(0)
                     poly_list.append(poly)
+        
         if not poly_list:
             return None
-        if len(poly_list) == 1:
-            return poly_list[0]
-        return unary_union(poly_list)
+        
+        # Filter out any remaining invalid geometries
+        valid_polys = [p for p in poly_list if p.is_valid]
+        if not valid_polys:
+            return None
+        if len(valid_polys) == 1:
+            return valid_polys[0]
+        try:
+            return unary_union(valid_polys)
+        except Exception as e:
+            st.error("Error during union: " + str(e))
+            return None
 
     def check_overlaps(gdf, target_code):
         """
