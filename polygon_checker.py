@@ -188,4 +188,36 @@ else:
         if results:
             st.subheader("Overlap Results:")
             for result in results:
-                percentage = (result['overlap_area'] / res
+                percentage = (result['overlap_area'] / result['total_area']) * 100 if result['total_area'] else 0
+                st.write(f"**Farmer {result['Farmercode']}**:")
+                st.write(f"- Overlap Area: {result['overlap_area']:.2f} m²")
+                st.write(f"- Percentage of Target Area: {percentage:.2f}%")
+                st.write("---")
+            st.subheader("Overall Overlap Summary:")
+            st.write(f"🔹 **Total Overlap Percentage (Union): {overall_percentage:.2f}%**")
+        else:
+            st.success("No overlaps found!")
+
+    # --- DISPLAY TARGET POLYGON AREA ---
+    target_row = gdf[gdf['Farmercode'] == selected_code]
+    if not target_row.empty:
+        target_area_m2 = target_row.geometry.iloc[0].area
+        target_area_acres = target_area_m2 * 0.000247105  # m² to acres conversion
+        st.subheader("Target Polygon Area:")
+        st.write(f"Total Area: {target_area_m2:.2f} m² ({target_area_acres:.4f} acres)")
+
+    # --- EXPORT UPDATED FORM AS EXCEL ---
+    if st.button("Export Updated Form to Excel"):
+        export_df = gdf.copy()
+        export_df['geometry'] = export_df['geometry'].apply(lambda geom: geom.wkt)
+        towrite = io.BytesIO()
+        with pd.ExcelWriter(towrite, engine="xlsxwriter") as writer:
+            export_df.to_excel(writer, index=False, sheet_name="Updated Form")
+            writer.save()
+        towrite.seek(0)
+        st.download_button(
+            label="Download Updated Inspection Form",
+            data=towrite,
+            file_name="updated_inspection_form.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
