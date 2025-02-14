@@ -48,12 +48,19 @@ else:
         # If the redo file uses a different column name for farmer code, rename it.
         if "farmer_code" in df_redo.columns:
             df_redo = df_redo.rename(columns={'farmer_code': 'Farmercode'})
-    
+        
         # Check for required columns in the redo file
         required_redo_cols = ['Farmercode', 'selectplot', 'polygonplot']
         if not all(col in df_redo.columns for col in required_redo_cols):
             st.error("Redo polygon file must contain 'Farmercode', 'selectplot', and 'polygonplot' columns.")
             st.stop()
+        
+        # --- Use SubmissionDate and endtime to select latest submission ---
+        if 'SubmissionDate' in df_redo.columns and 'endtime' in df_redo.columns:
+            df_redo['SubmissionDate'] = pd.to_datetime(df_redo['SubmissionDate'], errors='coerce')
+            df_redo['endtime'] = pd.to_datetime(df_redo['endtime'], errors='coerce')
+            df_redo = df_redo.sort_values(by=['SubmissionDate', 'endtime'])
+            df_redo = df_redo.groupby('Farmercode', as_index=False).last()
         
         # Rename redo file columns to avoid conflict
         df_redo = df_redo.rename(columns={'selectplot': 'redo_selectplot', 
