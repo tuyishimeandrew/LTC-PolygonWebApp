@@ -89,7 +89,6 @@ def check_overlaps(gdf, target_code):
     return overlaps, overall_overlap_percentage
 
 # --- UPLOAD MAIN INSPECTION FORM ---
-
 st.subheader("1. Upload Main Inspection Form")
 main_file = st.file_uploader("Upload Main Inspection Form CSV or Excel File", type=["xlsx", "csv"], key="main")
 if main_file is None:
@@ -111,7 +110,6 @@ if 'Farmercode' not in df.columns or 'polygonplot' not in df.columns:
     st.stop()
 
 # --- UPLOAD OPTIONAL REDO POLYGON FORM ---
-
 st.subheader("2. Upload Redo Polygon Form (Optional)")
 redo_file = st.file_uploader("Upload Redo Polygon Excel File", type=["xlsx"], key="redo")
 if redo_file is not None:
@@ -135,30 +133,30 @@ if redo_file is not None:
                   on='Farmercode', how='left')
     
     # --- Condition 1 ---
-    # If main form's polygonplot is not null and redo_selectplot is Plot1, then update polygonplot.
+    # If main form's polygonplot is not null and redo_selectplot is Plot1, update polygonplot.
     cond1 = df['polygonplot'].notna() & (df['redo_selectplot'] == 'Plot1')
     df.loc[cond1, 'polygonplot'] = df.loc[cond1, 'redo_polygonplot']
     
     # --- Condition 2 ---
-    # If polygonplotnew_1 is not null and redo_selectplot is Plot2, then update polygonplot.
+    # If polygonplotnew_1 is not null and redo_selectplot is Plot2, update polygonplot.
     if 'polygonplotnew_1' in df.columns:
         cond2 = df['polygonplotnew_1'].notna() & (df['redo_selectplot'] == 'Plot2')
         df.loc[cond2, 'polygonplot'] = df.loc[cond2, 'redo_polygonplot']
     
     # --- Condition 3 ---
-    # If polygonplotnew_2 is not null and redo_selectplot is Plot3, then update polygonplotnew_2.
+    # If polygonplotnew_2 is not null and redo_selectplot is Plot3, update polygonplotnew_2.
     if 'polygonplotnew_2' in df.columns:
         cond3 = df['polygonplotnew_2'].notna() & (df['redo_selectplot'] == 'Plot3')
         df.loc[cond3, 'polygonplotnew_2'] = df.loc[cond3, 'redo_polygonplot']
     
     # --- Condition 4 ---
-    # If polygonplotnew_3 is not null and redo_selectplot is Plot4, then update polygonplotnew_3.
+    # If polygonplotnew_3 is not null and redo_selectplot is Plot4, update polygonplotnew_3.
     if 'polygonplotnew_3' in df.columns:
         cond4 = df['polygonplotnew_3'].notna() & (df['redo_selectplot'] == 'Plot4')
         df.loc[cond4, 'polygonplotnew_3'] = df.loc[cond4, 'redo_polygonplot']
     
     # --- Condition 5 ---
-    # If polygonplotnew_4 is not null and redo_selectplot is Plot5, then update polygonplotnew_4.
+    # If polygonplotnew_4 is not null and redo_selectplot is Plot5, update polygonplotnew_4.
     if 'polygonplotnew_4' in df.columns:
         cond5 = df['polygonplotnew_4'].notna() & (df['redo_selectplot'] == 'Plot5')
         df.loc[cond5, 'polygonplotnew_4'] = df.loc[cond5, 'redo_polygonplot']
@@ -167,7 +165,6 @@ if redo_file is not None:
     df = df.drop(columns=['redo_selectplot', 'redo_polygonplot'])
 
 # --- CREATE GEOMETRY BY COMBINING POLYGON COLUMNS ---
-
 # Combine available polygon strings into a single geometry for each row.
 df['geometry'] = df.apply(combine_polygons, axis=1)
 
@@ -185,7 +182,6 @@ gdf['geometry'] = gdf['geometry'].buffer(0)
 gdf = gdf[gdf.is_valid]
 
 # --- SELECT FARMER CODE AND CHECK OVERLAPS ---
-
 farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
 if not farmer_codes:
     st.error("No Farmer codes found in the processed data.")
@@ -211,7 +207,6 @@ if st.button("Check Overlaps"):
         st.success("No overlaps found!")
 
 # --- DISPLAY TARGET POLYGON AREA ---
-
 target_row = gdf[gdf['Farmercode'] == selected_code]
 if not target_row.empty:
     target_area_m2 = target_row.geometry.iloc[0].area
@@ -220,7 +215,6 @@ if not target_row.empty:
     st.write(f"Total Area: {target_area_m2:.2f} m² ({target_area_acres:.4f} acres)")
 
 # --- EXPORT UPDATED FORM AS EXCEL ---
-
 if st.button("Export Updated Form to Excel"):
     # Create a copy for export
     export_df = gdf.copy()
