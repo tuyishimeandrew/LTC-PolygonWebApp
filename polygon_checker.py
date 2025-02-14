@@ -45,6 +45,10 @@ else:
             st.error("Error loading redo polygon file: " + str(e))
             st.stop()
     
+        # If the redo file uses a different column name for farmer code, rename it.
+        if "farmer_code" in df_redo.columns:
+            df_redo = df_redo.rename(columns={'farmer_code': 'Farmercode'})
+    
         # Check for required columns in the redo file
         required_redo_cols = ['Farmercode', 'selectplot', 'polygonplot']
         if not all(col in df_redo.columns for col in required_redo_cols):
@@ -52,7 +56,8 @@ else:
             st.stop()
         
         # Rename redo file columns to avoid conflict
-        df_redo = df_redo.rename(columns={'selectplot': 'redo_selectplot', 'polygonplot': 'redo_polygonplot'})
+        df_redo = df_redo.rename(columns={'selectplot': 'redo_selectplot', 
+                                            'polygonplot': 'redo_polygonplot'})
         
         # Merge the redo data with the main form data on Farmercode
         df = df.merge(df_redo[['Farmercode', 'redo_selectplot', 'redo_polygonplot']],
