@@ -5,7 +5,7 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 import io
 
-st.title("Polygon Overlap Checker")
+st.title("LTC Polygon Overlap Checker")
 
 # --- Display Two Upload Areas Side-by-Side ---
 col1, col2 = st.columns(2)
