@@ -83,36 +83,37 @@ def check_overlaps(gdf, target_code):
                 # Compute union of intersections
                 union_overlap = intersection if union_overlap is None else union_overlap.union(intersection)
 
-    # Calculate overall overlap percentage
     overall_overlap_area = union_overlap.area if union_overlap else 0
     overall_overlap_percentage = (overall_overlap_area / total_target_area) * 100 if total_target_area else 0
 
     return overlaps, overall_overlap_percentage
 
-# --- UPLOAD INSPECTION FILE ---
+# --- UPLOAD MAIN INSPECTION FORM ---
 
-uploaded_file = st.file_uploader("Upload Inspection Form CSV or Excel File", type=["xlsx", "csv"])
-if uploaded_file is None:
-    st.info("Please upload the Inspection Form file.")
+st.subheader("1. Upload Main Inspection Form")
+main_file = st.file_uploader("Upload Main Inspection Form CSV or Excel File", type=["xlsx", "csv"], key="main")
+if main_file is None:
+    st.info("Please upload the Main Inspection Form file.")
     st.stop()
 
 try:
-    if uploaded_file.name.endswith('.xlsx'):
-        df = pd.read_excel(uploaded_file, engine='openpyxl')
+    if main_file.name.endswith('.xlsx'):
+        df = pd.read_excel(main_file, engine='openpyxl')
     else:
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(main_file)
 except Exception as e:
-    st.error("Error loading file: " + str(e))
+    st.error("Error loading main file: " + str(e))
     st.stop()
 
-# Ensure required columns exist
+# Ensure required columns exist in the main form
 if 'Farmercode' not in df.columns or 'polygonplot' not in df.columns:
-    st.error("The uploaded file must contain 'Farmercode' and 'polygonplot' columns.")
+    st.error("The Main Inspection Form must contain 'Farmercode' and 'polygonplot' columns.")
     st.stop()
 
-# --- OPTIONAL: UPLOAD REDO POLYGON FILE ---
+# --- UPLOAD OPTIONAL REDO POLYGON FORM ---
 
-redo_file = st.file_uploader("Upload Redo Polygon Excel File (Optional)", type=["xlsx"])
+st.subheader("2. Upload Redo Polygon Form (Optional)")
+redo_file = st.file_uploader("Upload Redo Polygon Excel File", type=["xlsx"], key="redo")
 if redo_file is not None:
     try:
         df_redo = pd.read_excel(redo_file, engine='openpyxl')
@@ -120,7 +121,7 @@ if redo_file is not None:
         st.error("Error loading redo polygon file: " + str(e))
         st.stop()
 
-    # Check for required columns in redo file
+    # Check for required columns in the redo file
     required_redo_cols = ['Farmercode', 'selectplot', 'polygonplot']
     if not all(col in df_redo.columns for col in required_redo_cols):
         st.error("Redo polygon file must contain 'Farmercode', 'selectplot', and 'polygonplot' columns.")
@@ -129,32 +130,37 @@ if redo_file is not None:
     # Rename redo file columns to avoid conflict
     df_redo = df_redo.rename(columns={'selectplot': 'redo_selectplot', 'polygonplot': 'redo_polygonplot'})
     
-    # Merge the redo data with the inspection form data on Farmercode
+    # Merge the redo data with the main form data on Farmercode
     df = df.merge(df_redo[['Farmercode', 'redo_selectplot', 'redo_polygonplot']], 
                   on='Farmercode', how='left')
     
     # --- Condition 1 ---
-    cond1 = df['polygonplot'].notna() & (df['redo_selectplot'] == 'plot_1')
+    # If main form's polygonplot is not null and redo_selectplot is Plot1, then update polygonplot.
+    cond1 = df['polygonplot'].notna() & (df['redo_selectplot'] == 'Plot1')
     df.loc[cond1, 'polygonplot'] = df.loc[cond1, 'redo_polygonplot']
     
     # --- Condition 2 ---
+    # If polygonplotnew_1 is not null and redo_selectplot is Plot2, then update polygonplot.
     if 'polygonplotnew_1' in df.columns:
-        cond2 = df['polygonplotnew_1'].notna() & (df['redo_selectplot'] == 'plot_2')
+        cond2 = df['polygonplotnew_1'].notna() & (df['redo_selectplot'] == 'Plot2')
         df.loc[cond2, 'polygonplot'] = df.loc[cond2, 'redo_polygonplot']
     
     # --- Condition 3 ---
+    # If polygonplotnew_2 is not null and redo_selectplot is Plot3, then update polygonplotnew_2.
     if 'polygonplotnew_2' in df.columns:
-        cond3 = df['polygonplotnew_2'].notna() & (df['redo_selectplot'] == 'plot_3')
+        cond3 = df['polygonplotnew_2'].notna() & (df['redo_selectplot'] == 'Plot3')
         df.loc[cond3, 'polygonplotnew_2'] = df.loc[cond3, 'redo_polygonplot']
     
     # --- Condition 4 ---
+    # If polygonplotnew_3 is not null and redo_selectplot is Plot4, then update polygonplotnew_3.
     if 'polygonplotnew_3' in df.columns:
-        cond4 = df['polygonplotnew_3'].notna() & (df['redo_selectplot'] == 'plot_4')
+        cond4 = df['polygonplotnew_3'].notna() & (df['redo_selectplot'] == 'Plot4')
         df.loc[cond4, 'polygonplotnew_3'] = df.loc[cond4, 'redo_polygonplot']
     
     # --- Condition 5 ---
+    # If polygonplotnew_4 is not null and redo_selectplot is Plot5, then update polygonplotnew_4.
     if 'polygonplotnew_4' in df.columns:
-        cond5 = df['polygonplotnew_4'].notna() & (df['redo_selectplot'] == 'plot_5')
+        cond5 = df['polygonplotnew_4'].notna() & (df['redo_selectplot'] == 'Plot5')
         df.loc[cond5, 'polygonplotnew_4'] = df.loc[cond5, 'redo_polygonplot']
     
     # Optionally, drop the redo columns after updating
@@ -162,7 +168,7 @@ if redo_file is not None:
 
 # --- CREATE GEOMETRY BY COMBINING POLYGON COLUMNS ---
 
-# For each row, combine the polygons available from the possible columns.
+# Combine available polygon strings into a single geometry for each row.
 df['geometry'] = df.apply(combine_polygons, axis=1)
 
 # Remove rows where no valid geometry could be created
@@ -182,7 +188,7 @@ gdf = gdf[gdf.is_valid]
 
 farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
 if not farmer_codes:
-    st.error("No Farmer codes found in the uploaded file.")
+    st.error("No Farmer codes found in the processed data.")
     st.stop()
 
 selected_code = st.selectbox("Select Farmer Code", farmer_codes)
@@ -218,7 +224,7 @@ if not target_row.empty:
 if st.button("Export Updated Form to Excel"):
     # Create a copy for export
     export_df = gdf.copy()
-    # Convert the geometry column to WKT strings for export readability
+    # Convert the geometry column to WKT strings for readability in Excel
     export_df['geometry'] = export_df['geometry'].apply(lambda geom: geom.wkt)
     
     towrite = io.BytesIO()
