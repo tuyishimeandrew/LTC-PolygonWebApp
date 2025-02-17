@@ -18,7 +18,7 @@ with col1:
 with col2:
     st.subheader("Redo Polygon File")
     redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)",
-                                 type=["xlsx", "csv"], key="redo_upload")
+                                 type=["xlsx","csv"], key="redo_upload")
 
 # --- Process Main File Only If Provided ---
 if main_file is None:
@@ -53,56 +53,46 @@ else:
         st.error("Error loading redo polygon file: " + str(e))
         st.stop()
 
-    # If the redo file uses a different column name for farmer code, rename it.
+    # Rename column if necessary
     if "farmer_code" in df_redo.columns:
         df_redo = df_redo.rename(columns={'farmer_code': 'Farmercode'})
 
-    # Check for required columns in the redo file
     required_redo_cols = ['Farmercode', 'selectplot', 'polygonplot']
     if not all(col in df_redo.columns for col in required_redo_cols):
         st.error("Redo polygon file must contain 'Farmercode', 'selectplot', and 'polygonplot' columns.")
         st.stop()
 
-    # --- Use SubmissionDate and endtime to select latest submission ---
     if 'SubmissionDate' in df_redo.columns and 'endtime' in df_redo.columns:
         df_redo['SubmissionDate'] = pd.to_datetime(df_redo['SubmissionDate'], errors='coerce')
         df_redo['endtime'] = pd.to_datetime(df_redo['endtime'], errors='coerce')
         df_redo = df_redo.sort_values(by=['SubmissionDate', 'endtime'])
         df_redo = df_redo.groupby('Farmercode', as_index=False).last()
 
-    # Rename redo file columns to avoid conflict
     df_redo = df_redo.rename(columns={'selectplot': 'redo_selectplot',
                                       'polygonplot': 'redo_polygonplot'})
 
-    # Merge the redo data with the main file on Farmercode
     df = df.merge(df_redo[['Farmercode', 'redo_selectplot', 'redo_polygonplot']],
                   on='Farmercode', how='left')
 
-    # --- Condition 1 ---
     cond1 = df['polygonplot'].notna() & (df['redo_selectplot'] == 'Plot1')
     df.loc[cond1, 'polygonplot'] = df.loc[cond1, 'redo_polygonplot']
 
-    # --- Condition 2 ---
     if 'polygonplotnew_1' in df.columns:
         cond2 = df['polygonplotnew_1'].notna() & (df['redo_selectplot'] == 'Plot2')
         df.loc[cond2, 'polygonplot'] = df.loc[cond2, 'redo_polygonplot']
 
-    # --- Condition 3 ---
     if 'polygonplotnew_2' in df.columns:
         cond3 = df['polygonplotnew_2'].notna() & (df['redo_selectplot'] == 'Plot3')
         df.loc[cond3, 'polygonplotnew_2'] = df.loc[cond3, 'redo_polygonplot']
 
-    # --- Condition 4 ---
     if 'polygonplotnew_3' in df.columns:
         cond4 = df['polygonplotnew_3'].notna() & (df['redo_selectplot'] == 'Plot4')
         df.loc[cond4, 'polygonplotnew_3'] = df.loc[cond4, 'redo_polygonplot']
 
-    # --- Condition 5 ---
     if 'polygonplotnew_4' in df.columns:
         cond5 = df['polygonplotnew_4'].notna() & (df['redo_selectplot'] == 'Plot5')
         df.loc[cond5, 'polygonplotnew_4'] = df.loc[cond5, 'redo_polygonplot']
 
-    # Drop the redo columns after updating
     df = df.drop(columns=['redo_selectplot', 'redo_polygonplot'])
 
 # --- FUNCTIONS FOR POLYGON HANDLING ---
@@ -219,6 +209,23 @@ if st.button("Export Updated Form to Excel"):
     )
 
 # ----------------------------
+# HELPER: Function to plot geometry (handles Polygon, MultiPolygon, and GeometryCollection)
+# ----------------------------
+def plot_geometry(ax, geom, color, label, text_label):
+    if hasattr(geom, 'exterior'):
+        ix, iy = geom.exterior.xy
+        ax.fill(ix, iy, alpha=0.5, fc=color, ec='darkred', label=label)
+        cx, cy = geom.centroid.x, geom.centroid.y
+        ax.text(cx, cy, f"{text_label:.1f}%", fontsize=10, color='white', ha='center', va='center')
+    elif geom.geom_type in ['MultiPolygon', 'GeometryCollection']:
+        for part in geom.geoms:
+            if hasattr(part, 'exterior'):
+                ix, iy = part.exterior.xy
+                ax.fill(ix, iy, alpha=0.5, fc=color, ec='darkred', label=label)
+                cx, cy = part.centroid.x, part.centroid.y
+                ax.text(cx, cy, f"{text_label:.1f}%", fontsize=10, color='white', ha='center', va='center')
+
+# ----------------------------
 # SINGLE BUTTON: Check Overlaps & Inconsistencies
 # ----------------------------
 if st.button("Check Overlaps & Inconsistencies"):
@@ -238,7 +245,6 @@ if st.button("Check Overlaps & Inconsistencies"):
     else:
         st.success("No overlaps found for this code!")
 
-    # --- Show Overlap Map if there are overlaps
     if overlaps:
         st.subheader("Overlap Map")
         target_gdf = gdf[gdf['Farmercode'] == selected_code]
@@ -246,23 +252,18 @@ if st.button("Check Overlaps & Inconsistencies"):
             target_poly = target_gdf.geometry.iloc[0]
             fig, ax = plt.subplots(figsize=(8, 8))
             # Plot target polygon in blue
-            x, y = target_poly.exterior.xy
-            ax.fill(x, y, alpha=0.5, fc='blue', ec='black', label=f"Target: {selected_code}")
-            # Plot each overlap in red
+            if hasattr(target_poly, 'exterior'):
+                x, y = target_poly.exterior.xy
+                ax.fill(x, y, alpha=0.5, fc='blue', ec='black', label=f"Target: {selected_code}")
+            else:
+                for part in target_poly.geoms:
+                    x, y = part.exterior.xy
+                    ax.fill(x, y, alpha=0.5, fc='blue', ec='black', label=f"Target: {selected_code}")
+            # Plot overlaps in red
             for overlap in overlaps:
                 inter_geom = overlap['intersection']
                 overlap_percent = (overlap['overlap_area'] / overlap['total_area']) * 100 if overlap['total_area'] else 0
-                if inter_geom.geom_type == 'Polygon':
-                    ix, iy = inter_geom.exterior.xy
-                    ax.fill(ix, iy, alpha=0.5, fc='red', ec='darkred', label=f"Overlap {overlap['Farmercode']}")
-                    cx, cy = inter_geom.centroid.x, inter_geom.centroid.y
-                    ax.text(cx, cy, f"{overlap_percent:.1f}%", fontsize=10, color='white', ha='center', va='center')
-                elif inter_geom.geom_type == 'MultiPolygon':
-                    for geom_part in inter_geom.geoms:
-                        ix, iy = geom_part.exterior.xy
-                        ax.fill(ix, iy, alpha=0.5, fc='red', ec='darkred', label=f"Overlap {overlap['Farmercode']}")
-                        cx, cy = geom_part.centroid.x, geom_part.centroid.y
-                        ax.text(cx, cy, f"{overlap_percent:.1f}%", fontsize=10, color='white', ha='center', va='center')
+                plot_geometry(ax, inter_geom, 'red', f"Overlap {overlap['Farmercode']}", overlap_percent)
             ax.set_title(f"Overlap Map for Farmer {selected_code}")
             ax.set_xlabel("Easting")
             ax.set_ylabel("Northing")
@@ -278,29 +279,21 @@ if st.button("Check Overlaps & Inconsistencies"):
     df_code = df[df['Farmercode'] == selected_code].copy()
     gdf_code = gdf[gdf['Farmercode'] == selected_code].copy()
 
-    # Before checking, ensure that Phone columns are numeric
+    # Ensure Phone columns are numeric
     if 'Phone' in df_code.columns:
         df_code['Phone'] = pd.to_numeric(df_code['Phone'], errors='coerce')
     if 'Phone_hidden' in df_code.columns:
         df_code['Phone_hidden'] = pd.to_numeric(df_code['Phone_hidden'], errors='coerce')
 
-    # Standard checks for selected code
     required_inconsistency_cols = ['Farmercode', 'username', 'duration', 'Registered', 'Phone', 'Phone_hidden']
     missing_cols = [col for col in required_inconsistency_cols if col not in df.columns]
 
     if missing_cols:
         st.error(f"Missing columns for inconsistency checks: {', '.join(missing_cols)}")
     else:
-        # Check 1: Duration < 15 mins but Registered == 'Yes'
         time_inconsistency = df_code[(df_code['duration'] < 900) & (df_code['Registered'].str.lower()=='yes')]
-        
-        # Check 2: Phone mismatch
         phone_mismatch = df_code[df_code['Phone'] != df_code['Phone_hidden']]
-        
-        # Check 3: Duplicate Phone entries (within this code)
         duplicate_phones = df_code[df_code.duplicated(subset=['Phone'], keep=False)]
-        
-        # Check 4: Duplicate Farmer codes (within this code)
         duplicate_farmercodes = df_code[df_code.duplicated(subset=['Farmercode'], keep=False)]
         
         with st.expander("Time Inconsistencies (Duration < 15 mins but Registered == Yes)"):
@@ -327,7 +320,6 @@ if st.button("Check Overlaps & Inconsistencies"):
             else:
                 st.write("No duplicate Farmer codes found.")
 
-    # Check Productive Plants
     if 'Productiveplants' in df.columns:
         if not gdf_code.empty:
             gdf_code['acres'] = gdf_code['geometry'].area * 0.000247105
@@ -345,8 +337,7 @@ if st.button("Check Overlaps & Inconsistencies"):
     else:
         st.info("Column 'Productiveplants' not found; skipping productive plants check.")
     
-    # Check Uganda Polygon for selected code
-    uganda_coords = [
+    uganda_coords =  [
             (30.471786, -1.066837), (30.460829, -1.063428), (30.445614, -1.058694),
             (30.432023, -1.060554), (30.418897, -1.066445), (30.403188, -1.070373),
             (30.386341, -1.068202), (30.369288, -1.063241), (30.352752, -1.060761),
@@ -556,7 +547,6 @@ if st.button("Check Overlaps & Inconsistencies"):
     st.subheader("General Inconsistencies (All Codes)")
     inconsistencies_list = []
 
-    # Standard checks across entire dataset
     if all(col in df.columns for col in required_inconsistency_cols):
         df_time_incons = df[(df['duration'] < 900) & (df['Registered'].str.lower()=='yes')]
         for _, row in df_time_incons.iterrows():
@@ -590,7 +580,6 @@ if st.button("Check Overlaps & Inconsistencies"):
                 'inconsistency': "Duplicate Farmer code"
             })
 
-    # Productiveplants check across entire dataset
     if 'Productiveplants' in df.columns:
         gdf_plants = gdf.copy()
         gdf_plants['acres'] = gdf_plants['geometry'].area * 0.000247105
@@ -604,7 +593,6 @@ if st.button("Check Overlaps & Inconsistencies"):
                 'inconsistency': "Productiveplants exceed expected per acre"
             })
 
-    # Uganda polygon check across entire dataset
     df_uganda_incons = gdf[gdf['geometry'].within(uganda_poly)]
     for _, row in df_uganda_incons.iterrows():
         inconsistencies_list.append({
