@@ -62,7 +62,7 @@ with col1:
 with col2:
     st.subheader("Redo Polygon File")
     redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)",
-                                 type=["xlsx","csv"], key="redo_upload")
+                                 type=["xlsx", "csv"], key="redo_upload")
 st.markdown('</div>', unsafe_allow_html=True)
 
 # --- PROCESS MAIN FILE ---
@@ -312,35 +312,35 @@ with st.expander("Data Inconsistency Checks", expanded=True):
         if missing_cols:
             st.error(f"Missing columns for inconsistency checks: {', '.join(missing_cols)}")
         else:
+            # Check 1: Duration less than 15 minutes (900 seconds) but Registered == 'Yes'
             time_inconsistency = df[(df['duration'] < 900) & (df['Registered'].str.lower()=='yes')]
+            # Check 2: Phone and Phone_hidden mismatch
             phone_mismatch = df[df['Phone'] != df['Phone_hidden']]
+            # Check 3: Duplicate Phone entries
             duplicate_phones = df[df.duplicated(subset=['Phone'], keep=False)]
+            # Check 4: Duplicate Farmer codes
             duplicate_farmercodes = df[df.duplicated(subset=['Farmercode'], keep=False)]
             
-            st.markdown("<div class='subheader'>Time Inconsistencies</div>", unsafe_allow_html=True)
-            with st.expander("Duration < 15 mins but Registered == Yes"):
-                if not time_inconsistency.empty:
-                    st.write(time_inconsistency[['Farmercode', 'username', 'duration', 'Registered']])
-                else:
-                    st.write("No time inconsistencies found.")
+            st.markdown("### Time Inconsistencies (Duration < 15 mins but Registered == Yes)")
+            if not time_inconsistency.empty:
+                st.write(time_inconsistency[['Farmercode', 'username', 'duration', 'Registered']])
+            else:
+                st.write("No time inconsistencies found.")
             
-            st.markdown("<div class='subheader'>Phone Mismatches</div>", unsafe_allow_html=True)
-            with st.expander("Phone != Phone_hidden"):
-                if not phone_mismatch.empty:
-                    st.write(phone_mismatch[['Farmercode', 'username', 'Phone', 'Phone_hidden']])
-                else:
-                    st.write("No phone mismatches found.")
+            st.markdown("### Phone Mismatches (Phone != Phone_hidden)")
+            if not phone_mismatch.empty:
+                st.write(phone_mismatch[['Farmercode', 'username', 'Phone', 'Phone_hidden']])
+            else:
+                st.write("No phone mismatches found.")
             
-            st.markdown("<div class='subheader'>Duplicate Phone Entries</div>", unsafe_allow_html=True)
-            with st.expander("Duplicate Phone Entries"):
-                if not duplicate_phones.empty:
-                    st.write(duplicate_phones[['Farmercode', 'username', 'Phone']])
-                else:
-                    st.write("No duplicate phone entries found.")
+            st.markdown("### Duplicate Phone Entries")
+            if not duplicate_phones.empty:
+                st.write(duplicate_phones[['Farmercode', 'username', 'Phone']])
+            else:
+                st.write("No duplicate phone entries found.")
             
-            st.markdown("<div class='subheader'>Duplicate Farmer Codes</div>", unsafe_allow_html=True)
-            with st.expander("Duplicate Farmer Codes"):
-                if not duplicate_farmercodes.empty:
-                    st.write(duplicate_farmercodes[['Farmercode', 'username']])
-                else:
-                    st.write("No duplicate Farmer codes found.")
+            st.markdown("### Duplicate Farmer Codes")
+            if not duplicate_farmercodes.empty:
+                st.write(duplicate_farmercodes[['Farmercode', 'username']])
+            else:
+                st.write("No duplicate Farmer codes found.")
