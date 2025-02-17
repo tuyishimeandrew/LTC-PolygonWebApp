@@ -264,19 +264,14 @@ if st.button("Export Updated Form to Excel"):
 # --- DATA INCONSISTENCY CHECKS ---
 if st.button("Check Data Inconsistencies"):
     # Ensure required columns for inconsistencies exist:
-    # 'Farmercode', 'username', 'starttime', 'endtime', 'Registered', 'Phone', 'Phone_hidden'
-    required_inconsistency_cols = ['Farmercode', 'username', 'starttime', 'endtime', 'Registered', 'Phone', 'Phone_hidden']
+    # 'Farmercode', 'username', 'Duration', 'Registered', 'Phone', 'Phone_hidden'
+    required_inconsistency_cols = ['Farmercode', 'username', 'Duration', 'Registered', 'Phone', 'Phone_hidden']
     missing_cols = [col for col in required_inconsistency_cols if col not in df.columns]
     if missing_cols:
         st.error(f"Missing columns for inconsistency checks: {', '.join(missing_cols)}")
     else:
-        # Convert starttime and endtime to datetime
-        df['starttime_dt'] = pd.to_datetime(df['starttime'], errors='coerce')
-        df['endtime_dt'] = pd.to_datetime(df['endtime'], errors='coerce')
-        df['duration_minutes'] = (df['endtime_dt'] - df['starttime_dt']).dt.total_seconds() / 60.0
-
-        # Check 1: Duration less than 15 minutes but Registered == 'Yes'
-        time_inconsistency = df[(df['duration_minutes'] < 15) & (df['Registered'].str.lower()=='yes')]
+        # Check 1: Duration less than 15 minutes (900 seconds) but Registered == 'Yes'
+        time_inconsistency = df[(df['Duration'] < 900) & (df['Registered'].str.lower()=='yes')]
         
         # Check 2: Phone and Phone_hidden mismatch
         phone_mismatch = df[df['Phone'] != df['Phone_hidden']]
@@ -289,9 +284,9 @@ if st.button("Check Data Inconsistencies"):
         
         st.subheader("Data Inconsistencies Found")
         
-        with st.expander("Time Inconsistencies (duration < 15 mins but Registered == Yes)"):
+        with st.expander("Time Inconsistencies (Duration < 15 mins but Registered == Yes)"):
             if not time_inconsistency.empty:
-                st.write(time_inconsistency[['Farmercode', 'username', 'starttime', 'endtime', 'duration_minutes', 'Registered']])
+                st.write(time_inconsistency[['Farmercode', 'username', 'Duration', 'Registered']])
             else:
                 st.write("No time inconsistencies found.")
                 
