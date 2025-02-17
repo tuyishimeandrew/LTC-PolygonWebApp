@@ -34,7 +34,7 @@ except Exception as e:
     st.error("Error loading main file: " + str(e))
     st.stop()
 
-# Ensure required columns exist in the main form
+# Ensure required columns exist in the main file
 if 'Farmercode' not in df.columns or 'polygonplot' not in df.columns:
     st.error("The Main Inspection Form must contain 'Farmercode' and 'polygonplot' columns.")
     st.stop()
@@ -45,7 +45,10 @@ if redo_file is None:
     st.stop()
 else:
     try:
-        df_redo = pd.read_excel(redo_file, engine='openpyxl')
+        if redo_file.name.endswith('.xlsx'):
+            df_redo = pd.read_excel(redo_file, engine='openpyxl')
+        else:
+            df_redo = pd.read_csv(redo_file)
     except Exception as e:
         st.error("Error loading redo polygon file: " + str(e))
         st.stop()
@@ -71,7 +74,7 @@ else:
     df_redo = df_redo.rename(columns={'selectplot': 'redo_selectplot',
                                         'polygonplot': 'redo_polygonplot'})
 
-    # Merge the redo data with the main form data on Farmercode
+    # Merge the redo data with the main file on Farmercode
     df = df.merge(df_redo[['Farmercode', 'redo_selectplot', 'redo_polygonplot']],
                   on='Farmercode', how='left')
 
@@ -127,7 +130,6 @@ def combine_polygons(row):
         if col in row and pd.notna(row[col]):
             poly = parse_polygon_z(row[col])
             if poly is not None:
-                # Fix minor issues if the geometry is invalid
                 if not poly.is_valid:
                     poly = poly.buffer(0)
                 poly_list.append(poly)
@@ -164,7 +166,7 @@ def check_overlaps(gdf, target_code):
                     'Farmercode': row['Farmercode'],
                     'overlap_area': overlap_area,
                     'total_area': total_target_area,
-                    'intersection': intersection  # store the intersection geometry
+                    'intersection': intersection
                 })
                 union_overlap = intersection if union_overlap is None else union_overlap.union(intersection)
     overall_overlap_area = union_overlap.area if union_overlap else 0
@@ -211,19 +213,17 @@ if st.button("Show Overlap Map"):
     else:
         target_poly = target_row.geometry.iloc[0]
         overlaps, _ = check_overlaps(gdf, selected_code)
-        # Create a matplotlib figure
         fig, ax = plt.subplots(figsize=(8, 8))
-        # Plot target polygon (in blue with black edge)
-        x,y = target_poly.exterior.xy
+        # Plot target polygon (blue fill, black edge)
+        x, y = target_poly.exterior.xy
         ax.fill(x, y, alpha=0.5, fc='blue', ec='black', label=f"Target: {selected_code}")
-        # Plot overlapping intersections in red and annotate with percentage
+        # Plot overlapping intersections in red with percentage annotation
         for overlap in overlaps:
             inter_geom = overlap['intersection']
             percent = (overlap['overlap_area'] / overlap['total_area']) * 100 if overlap['total_area'] else 0
             if inter_geom.geom_type == 'Polygon':
                 ix, iy = inter_geom.exterior.xy
                 ax.fill(ix, iy, alpha=0.5, fc='red', ec='darkred', label=f"Overlap {overlap['Farmercode']}")
-                # Annotate at the centroid
                 cx, cy = inter_geom.centroid.x, inter_geom.centroid.y
                 ax.text(cx, cy, f"{percent:.1f}%", fontsize=10, color='white', ha='center', va='center')
             elif inter_geom.geom_type == 'MultiPolygon':
@@ -260,3 +260,55 @@ if st.button("Export Updated Form to Excel"):
         file_name="updated_inspection_form.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+# --- DATA INCONSISTENCY CHECKS ---
+if st.button("Check Data Inconsistencies"):
+    # Ensure required columns for inconsistencies exist:
+    # 'Farmercode', 'username', 'starttime', 'endtime', 'Registered', 'Phone', 'Phone_hidden'
+    required_inconsistency_cols = ['Farmercode', 'username', 'starttime', 'endtime', 'Registered', 'Phone', 'Phone_hidden']
+    missing_cols = [col for col in required_inconsistency_cols if col not in df.columns]
+    if missing_cols:
+        st.error(f"Missing columns for inconsistency checks: {', '.join(missing_cols)}")
+    else:
+        # Convert starttime and endtime to datetime
+        df['starttime_dt'] = pd.to_datetime(df['starttime'], errors='coerce')
+        df['endtime_dt'] = pd.to_datetime(df['endtime'], errors='coerce')
+        df['duration_minutes'] = (df['endtime_dt'] - df['starttime_dt']).dt.total_seconds() / 60.0
+
+        # Check 1: Duration less than 15 minutes but Registered == 'Yes'
+        time_inconsistency = df[(df['duration_minutes'] < 15) & (df['Registered'].str.lower()=='yes')]
+        
+        # Check 2: Phone and Phone_hidden mismatch
+        phone_mismatch = df[df['Phone'] != df['Phone_hidden']]
+        
+        # Check 3: Duplicate Phone entries
+        duplicate_phones = df[df.duplicated(subset=['Phone'], keep=False)]
+        
+        # Check 4: Duplicate Farmer codes
+        duplicate_farmercodes = df[df.duplicated(subset=['Farmercode'], keep=False)]
+        
+        st.subheader("Data Inconsistencies Found")
+        
+        with st.expander("Time Inconsistencies (duration < 15 mins but Registered == Yes)"):
+            if not time_inconsistency.empty:
+                st.write(time_inconsistency[['Farmercode', 'username', 'starttime', 'endtime', 'duration_minutes', 'Registered']])
+            else:
+                st.write("No time inconsistencies found.")
+                
+        with st.expander("Phone Mismatches (Phone != Phone_hidden)"):
+            if not phone_mismatch.empty:
+                st.write(phone_mismatch[['Farmercode', 'username', 'Phone', 'Phone_hidden']])
+            else:
+                st.write("No phone mismatches found.")
+                
+        with st.expander("Duplicate Phone Entries"):
+            if not duplicate_phones.empty:
+                st.write(duplicate_phones[['Farmercode', 'username', 'Phone']])
+            else:
+                st.write("No duplicate phone entries found.")
+                
+        with st.expander("Duplicate Farmer Codes"):
+            if not duplicate_farmercodes.empty:
+                st.write(duplicate_farmercodes[['Farmercode', 'username']])
+            else:
+                st.write("No duplicate Farmer codes found.")
