@@ -12,13 +12,13 @@ st.title("Latitude Polygon Overlap Checker")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("Main Inspection Form")
+    st.subheader("Main Inspection File")
     main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)",
                                  type=["xlsx", "csv"], key="main_upload")
 with col2:
-    st.subheader("Redo Polygon Form")
-    redo_file = st.file_uploader("Upload Redo Polygon Form (Excel Only)",
-                                 type=["xlsx"], key="redo_upload")
+    st.subheader("Redo Polygon File")
+    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)",
+                                 type=["xlsx","csv"], key="redo_upload")
 
 # --- Process Main File Only If Provided ---
 if main_file is None:
