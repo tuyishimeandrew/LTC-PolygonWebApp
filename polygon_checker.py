@@ -6,7 +6,7 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 import io
 
-st.title("Latitude Polygon Overlap Checker")
+st.title("Latitude Polygon Overlap & Inconsistency Checker")
 
 # --- Display Two Upload Areas Side-by-Side ---
 col1, col2 = st.columns(2)
@@ -72,7 +72,7 @@ else:
 
     # Rename redo file columns to avoid conflict
     df_redo = df_redo.rename(columns={'selectplot': 'redo_selectplot',
-                                        'polygonplot': 'redo_polygonplot'})
+                                      'polygonplot': 'redo_polygonplot'})
 
     # Merge the redo data with the main file on Farmercode
     df = df.merge(df_redo[['Farmercode', 'redo_selectplot', 'redo_polygonplot']],
@@ -147,6 +147,7 @@ def combine_polygons(row):
         return None
 
 def check_overlaps(gdf, target_code):
+    """Returns a list of overlap details and the overall overlap percentage for target_code."""
     target_row = gdf[gdf['Farmercode'] == target_code]
     if target_row.empty:
         return [], 0
@@ -168,7 +169,10 @@ def check_overlaps(gdf, target_code):
                     'total_area': total_target_area,
                     'intersection': intersection
                 })
-                union_overlap = intersection if union_overlap is None else union_overlap.union(intersection)
+                if union_overlap is None:
+                    union_overlap = intersection
+                else:
+                    union_overlap = union_overlap.union(intersection)
     overall_overlap_area = union_overlap.area if union_overlap else 0
     overall_overlap_percentage = (overall_overlap_area / total_target_area) * 100 if total_target_area else 0
     return overlaps, overall_overlap_percentage
@@ -183,60 +187,13 @@ gdf = gdf.to_crs('EPSG:2109')
 gdf['geometry'] = gdf['geometry'].buffer(0)
 gdf = gdf[gdf.is_valid]
 
-# --- SELECT FARMER CODE AND CHECK OVERLAPS ---
+# --- SELECT FARMER CODE ---
 farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
 if not farmer_codes:
     st.error("No Farmer codes found in the processed data.")
     st.stop()
+
 selected_code = st.selectbox("Select Farmer Code", farmer_codes)
-
-if st.button("Check Overlaps"):
-    results, overall_percentage = check_overlaps(gdf, selected_code)
-    if results:
-        st.subheader("Overlap Results:")
-        for result in results:
-            percentage = (result['overlap_area'] / result['total_area']) * 100 if result['total_area'] else 0
-            st.write(f"**Farmer {result['Farmercode']}**:")
-            st.write(f"- Overlap Area: {result['overlap_area']:.2f} m²")
-            st.write(f"- Percentage of Target Area: {percentage:.2f}%")
-            st.write("---")
-        st.subheader("Overall Overlap Summary:")
-        st.write(f"🔹 **Total Overlap Percentage (Union): {overall_percentage:.2f}%**")
-    else:
-        st.success("No overlaps found!")
-
-# --- PLOT THE TARGET POLYGON AND ITS OVERLAPS ---
-if st.button("Show Overlap Map"):
-    target_row = gdf[gdf['Farmercode'] == selected_code]
-    if target_row.empty:
-        st.error("Selected Farmer not found.")
-    else:
-        target_poly = target_row.geometry.iloc[0]
-        overlaps, _ = check_overlaps(gdf, selected_code)
-        fig, ax = plt.subplots(figsize=(8, 8))
-        # Plot target polygon (blue fill, black edge)
-        x, y = target_poly.exterior.xy
-        ax.fill(x, y, alpha=0.5, fc='blue', ec='black', label=f"Target: {selected_code}")
-        # Plot overlapping intersections in red with percentage annotation
-        for overlap in overlaps:
-            inter_geom = overlap['intersection']
-            percent = (overlap['overlap_area'] / overlap['total_area']) * 100 if overlap['total_area'] else 0
-            if inter_geom.geom_type == 'Polygon':
-                ix, iy = inter_geom.exterior.xy
-                ax.fill(ix, iy, alpha=0.5, fc='red', ec='darkred', label=f"Overlap {overlap['Farmercode']}")
-                cx, cy = inter_geom.centroid.x, inter_geom.centroid.y
-                ax.text(cx, cy, f"{percent:.1f}%", fontsize=10, color='white', ha='center', va='center')
-            elif inter_geom.geom_type == 'MultiPolygon':
-                for geom in inter_geom.geoms:
-                    ix, iy = geom.exterior.xy
-                    ax.fill(ix, iy, alpha=0.5, fc='red', ec='darkred', label=f"Overlap {overlap['Farmercode']}")
-                    cx, cy = geom.centroid.x, geom.centroid.y
-                    ax.text(cx, cy, f"{percent:.1f}%", fontsize=10, color='white', ha='center', va='center')
-        ax.set_title(f"Overlap Map for Farmer {selected_code}")
-        ax.set_xlabel("Easting")
-        ax.set_ylabel("Northing")
-        ax.legend(loc='upper right', fontsize='small')
-        st.pyplot(fig)
 
 # --- DISPLAY TARGET POLYGON AREA ---
 target_row = gdf[gdf['Farmercode'] == selected_code]
@@ -261,28 +218,83 @@ if st.button("Export Updated Form to Excel"):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-# --- DATA INCONSISTENCY CHECKS ---
-if st.button("Check Data Inconsistencies"):
-    # Ensure required columns for inconsistencies exist:
-    # 'Farmercode', 'username', 'duration', 'Registered', 'Phone', 'Phone_hidden'
+# ----------------------------
+# SINGLE BUTTON: Check Overlaps & Inconsistencies
+# ----------------------------
+if st.button("Check Overlaps & Inconsistencies"):
+    # 1) Overlap Checking for the selected code
+    overlaps, overall_percentage = check_overlaps(gdf, selected_code)
+
+    st.subheader(f"Overlap Results for Farmer {selected_code}")
+    if overlaps:
+        for result in overlaps:
+            percentage = (result['overlap_area'] / result['total_area']) * 100 if result['total_area'] else 0
+            st.write(f"**Overlaps with Farmer {result['Farmercode']}**:")
+            st.write(f"- Overlap Area: {result['overlap_area']:.2f} m²")
+            st.write(f"- Percentage of Target Area: {percentage:.2f}%")
+            st.write("---")
+        st.write(f"🔹 **Total Overlap Percentage (Union): {overall_percentage:.2f}%**")
+    else:
+        st.success("No overlaps found!")
+
+    # 2) Optional: Plot Overlaps
+    if overlaps:
+        if st.checkbox("Show Overlap Map", value=False):
+            target_gdf = gdf[gdf['Farmercode'] == selected_code]
+            if not target_gdf.empty:
+                target_poly = target_gdf.geometry.iloc[0]
+                fig, ax = plt.subplots(figsize=(8, 8))
+                # Plot target polygon
+                x, y = target_poly.exterior.xy
+                ax.fill(x, y, alpha=0.5, fc='blue', ec='black', label=f"Target: {selected_code}")
+                # Plot overlapping intersections in red
+                for overlap in overlaps:
+                    inter_geom = overlap['intersection']
+                    overlap_percent = (overlap['overlap_area'] / overlap['total_area']) * 100 if overlap['total_area'] else 0
+                    if inter_geom.geom_type == 'Polygon':
+                        ix, iy = inter_geom.exterior.xy
+                        ax.fill(ix, iy, alpha=0.5, fc='red', ec='darkred', label=f"Overlap {overlap['Farmercode']}")
+                        cx, cy = inter_geom.centroid.x, inter_geom.centroid.y
+                        ax.text(cx, cy, f"{overlap_percent:.1f}%", fontsize=10, color='white', ha='center', va='center')
+                    elif inter_geom.geom_type == 'MultiPolygon':
+                        for geom_part in inter_geom.geoms:
+                            ix, iy = geom_part.exterior.xy
+                            ax.fill(ix, iy, alpha=0.5, fc='red', ec='darkred', label=f"Overlap {overlap['Farmercode']}")
+                            cx, cy = geom_part.centroid.x, geom_part.centroid.y
+                            ax.text(cx, cy, f"{overlap_percent:.1f}%", fontsize=10, color='white', ha='center', va='center')
+                ax.set_title(f"Overlap Map for Farmer {selected_code}")
+                ax.set_xlabel("Easting")
+                ax.set_ylabel("Northing")
+                ax.legend(loc='upper right', fontsize='small')
+                st.pyplot(fig)
+            else:
+                st.warning("No target polygon found to plot.")
+
+    # 3) Data Inconsistency Checks (Filtered to selected_code)
+    st.subheader(f"Data Inconsistencies for Farmer {selected_code}")
+
+    # Filter the main df to the selected code
+    df_code = df[df['Farmercode'] == selected_code].copy()
+    gdf_code = gdf[gdf['Farmercode'] == selected_code].copy()
+
+    # Ensure required columns exist
     required_inconsistency_cols = ['Farmercode', 'username', 'duration', 'Registered', 'Phone', 'Phone_hidden']
     missing_cols = [col for col in required_inconsistency_cols if col not in df.columns]
+
     if missing_cols:
         st.error(f"Missing columns for inconsistency checks: {', '.join(missing_cols)}")
     else:
-        # Check 1: Duration less than 15 minutes (900 seconds) but Registered == 'Yes'
-        time_inconsistency = df[(df['duration'] < 900) & (df['Registered'].str.lower()=='yes')]
+        # Check 1: Duration < 15 mins but Registered == 'Yes'
+        time_inconsistency = df_code[(df_code['duration'] < 900) & (df_code['Registered'].str.lower()=='yes')]
         
-        # Check 2: Phone and Phone_hidden mismatch
-        phone_mismatch = df[df['Phone'] != df['Phone_hidden']]
+        # Check 2: Phone != Phone_hidden
+        phone_mismatch = df_code[df_code['Phone'] != df_code['Phone_hidden']]
         
-        # Check 3: Duplicate Phone entries
-        duplicate_phones = df[df.duplicated(subset=['Phone'], keep=False)]
+        # Check 3: Duplicate Phone entries (within this code's data)
+        duplicate_phones = df_code[df_code.duplicated(subset=['Phone'], keep=False)]
         
-        # Check 4: Duplicate Farmer codes
-        duplicate_farmercodes = df[df.duplicated(subset=['Farmercode'], keep=False)]
-        
-        st.subheader("Data Inconsistencies Found")
+        # Check 4: Duplicate Farmer codes (within this code's data)
+        duplicate_farmercodes = df_code[df_code.duplicated(subset=['Farmercode'], keep=False)]
         
         with st.expander("Time Inconsistencies (Duration < 15 mins but Registered == Yes)"):
             if not time_inconsistency.empty:
@@ -307,28 +319,34 @@ if st.button("Check Data Inconsistencies"):
                 st.write(duplicate_farmercodes[['Farmercode', 'username']])
             else:
                 st.write("No duplicate Farmer codes found.")
-                
-        # --- NEW INCONSISTENCY CHECK 1: Productive Plants vs. Expected ---
-        if 'Productiveplants' in df.columns:
-            # Calculate acreage for each record using geometry area (converted to acres)
-            gdf_incons = gdf.copy()
-            gdf_incons['acres'] = gdf_incons['geometry'].area * 0.000247105
-            gdf_incons['expected_plants'] = gdf_incons['acres'] * 450
-            # Convert the Productiveplants to numeric values (if not already)
-            gdf_incons['productiveplants'] = pd.to_numeric(gdf_incons['Productiveplants'], errors='coerce')
-            plants_inconsistency = gdf_incons[gdf_incons['productiveplants'] > gdf_incons['expected_plants']]
+
+    # --- NEW INCONSISTENCY CHECK 1: Productive Plants vs. Expected ---
+    if 'Productiveplants' in df.columns:
+        if not gdf_code.empty:
+            # Calculate acreage for this code's geometry
+            gdf_code['acres'] = gdf_code['geometry'].area * 0.000247105
+            gdf_code['expected_plants'] = gdf_code['acres'] * 450
+            # Convert the Productiveplants to numeric
+            gdf_code['productiveplants'] = pd.to_numeric(gdf_code['Productiveplants'], errors='coerce')
+            
+            # Check if actual plants exceed expected
+            plants_inconsistency = gdf_code[gdf_code['productiveplants'] > gdf_code['expected_plants']]
             
             with st.expander("Productive Plants Inconsistency (Plants exceed expected per acre)"):
                 if not plants_inconsistency.empty:
-                    st.write(plants_inconsistency[['Farmercode', 'productiveplants', 'expected_plants', 'acres']])
+                    st.write(plants_inconsistency[[
+                        'Farmercode', 'productiveplants', 'expected_plants', 'acres'
+                    ]])
                 else:
                     st.write("No productive plants inconsistencies found.")
         else:
-            st.info("Column 'Productiveplants' not found; skipping productive plants check.")
-        
-        # --- NEW INCONSISTENCY CHECK 2: Uganda Polygon Check ---
-        # Hard-code the Uganda polygon (using the provided coordinates)
-        uganda_coords = [
+            st.info("No geometry found for this code. Skipping Productiveplants check.")
+    else:
+        st.info("Column 'Productiveplants' not found; skipping productive plants check.")
+    
+    # --- NEW INCONSISTENCY CHECK 2: Uganda Polygon Check ---
+    # Hard-code the Uganda polygon
+    uganda_coords = [
             (30.471786, -1.066837), (30.460829, -1.063428), (30.445614, -1.058694),
             (30.432023, -1.060554), (30.418897, -1.066445), (30.403188, -1.070373),
             (30.386341, -1.068202), (30.369288, -1.063241), (30.352752, -1.060761),
@@ -520,16 +538,15 @@ if st.button("Check Data Inconsistencies"):
             (33.935117, -0.313106), (33.911346, -0.519295), (33.894809, -0.662749),
             (33.89853, -0.799072), (33.904214, -1.002573), (33.822255, -1.002573)
         ]
-        uganda_poly = Polygon(uganda_coords)
-        
-        uganda_inconsistency = gdf[gdf['geometry'].within(uganda_poly)]
+    uganda_poly = Polygon(uganda_coords)
+
+    if not gdf_code.empty:
+        uganda_inconsistency = gdf_code[gdf_code['geometry'].within(uganda_poly)]
         with st.expander("Uganda Polygon Inconsistency"):
             if not uganda_inconsistency.empty:
-                st.write("The following records have plots that lie within the specified Uganda boundary:")
+                st.write("This code's plot lies within the specified Uganda boundary:")
                 st.write(uganda_inconsistency[['Farmercode', 'geometry']])
             else:
-                st.write("No Uganda polygon inconsistencies found.")
-
-# When searching by Farmer code, you can display all inconsistencies for that code.
-# For example, you might filter each inconsistency check to only include rows where Farmercode == selected_code.
-# (This example above displays inconsistencies for all records. You can modify each expander to filter by selected_code if desired.)
+                st.write("No Uganda polygon inconsistencies found for this code.")
+    else:
+        st.info("No geometry found for this code. Skipping Uganda polygon check.")
