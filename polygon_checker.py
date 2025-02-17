@@ -16,7 +16,7 @@ with col1:
     main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)",
                                  type=["xlsx", "csv"], key="main_upload")
 with col2:
-    st.subheader("Redo Polygon Form (Mandatory)")
+    st.subheader("Redo Polygon Form")
     redo_file = st.file_uploader("Upload Redo Polygon Form (Excel Only)",
                                  type=["xlsx"], key="redo_upload")
 
