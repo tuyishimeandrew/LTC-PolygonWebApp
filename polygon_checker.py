@@ -264,14 +264,14 @@ if st.button("Export Updated Form to Excel"):
 # --- DATA INCONSISTENCY CHECKS ---
 if st.button("Check Data Inconsistencies"):
     # Ensure required columns for inconsistencies exist:
-    # 'Farmercode', 'username', 'Duration', 'Registered', 'Phone', 'Phone_hidden'
-    required_inconsistency_cols = ['Farmercode', 'username', 'Duration', 'Registered', 'Phone', 'Phone_hidden']
+    # 'Farmercode', 'username', 'duration', 'Registered', 'Phone', 'Phone_hidden'
+    required_inconsistency_cols = ['Farmercode', 'username', 'duration', 'Registered', 'Phone', 'Phone_hidden']
     missing_cols = [col for col in required_inconsistency_cols if col not in df.columns]
     if missing_cols:
         st.error(f"Missing columns for inconsistency checks: {', '.join(missing_cols)}")
     else:
         # Check 1: Duration less than 15 minutes (900 seconds) but Registered == 'Yes'
-        time_inconsistency = df[(df['Duration'] < 900) & (df['Registered'].str.lower()=='yes')]
+        time_inconsistency = df[(df['duration'] < 900) & (df['Registered'].str.lower()=='yes')]
         
         # Check 2: Phone and Phone_hidden mismatch
         phone_mismatch = df[df['Phone'] != df['Phone_hidden']]
@@ -286,7 +286,7 @@ if st.button("Check Data Inconsistencies"):
         
         with st.expander("Time Inconsistencies (Duration < 15 mins but Registered == Yes)"):
             if not time_inconsistency.empty:
-                st.write(time_inconsistency[['Farmercode', 'username', 'Duration', 'Registered']])
+                st.write(time_inconsistency[['Farmercode', 'username', 'duration', 'Registered']])
             else:
                 st.write("No time inconsistencies found.")
                 
