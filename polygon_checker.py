@@ -22,7 +22,7 @@ with col2:
 
 # --- Process Main File Only If Provided ---
 if main_file is None:
-    st.info("Please upload the Main Inspection Form file.")
+    st.info("Please upload the Main Inspection file and Redo file.")
     st.stop()
     
 try:
