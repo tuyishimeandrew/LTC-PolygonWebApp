@@ -18,7 +18,7 @@ with col1:
 with col2:
     st.subheader("Redo Polygon File")
     redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)",
-                                 type=["xlsx","csv"], key="redo_upload")
+                                 type=["xlsx", "csv"], key="redo_upload")
 
 # --- Process Main File Only If Provided ---
 if main_file is None:
@@ -325,13 +325,20 @@ if st.button("Check Overlaps & Inconsistencies"):
             gdf_code['acres'] = gdf_code['geometry'].area * 0.000247105
             gdf_code['expected_plants'] = gdf_code['acres'] * 450
             gdf_code['productiveplants'] = pd.to_numeric(gdf_code['Productiveplants'], errors='coerce')
+            # Check for plants exceeding expected per acre
             plants_inconsistency = gdf_code[gdf_code['productiveplants'] > gdf_code['expected_plants']]
-            
             with st.expander("Productive Plants Inconsistency (Plants exceed expected per acre)"):
                 if not plants_inconsistency.empty:
                     st.write(plants_inconsistency[['Farmercode', 'username', 'productiveplants', 'expected_plants', 'acres']])
                 else:
-                    st.write("No productive plants inconsistencies found.")
+                    st.write("No productive plants high inconsistencies found.")
+            # Check for plants less than half the expected value
+            low_plants_inconsistency = gdf_code[gdf_code['productiveplants'] < (gdf_code['expected_plants'] / 2)]
+            with st.expander("Productive Plants Inconsistency (Plants less than half expected per acre)"):
+                if not low_plants_inconsistency.empty:
+                    st.write(low_plants_inconsistency[['Farmercode', 'username', 'productiveplants', 'expected_plants', 'acres']])
+                else:
+                    st.write("No productive plants low inconsistencies found.")
         else:
             st.info("No geometry found for this code. Skipping productive plants check.")
     else:
@@ -594,6 +601,14 @@ if st.button("Check Overlaps & Inconsistencies"):
                 'Farmercode': row['Farmercode'],
                 'username': row.get('username', ''),
                 'inconsistency': "Productiveplants exceed expected per acre"
+            })
+        # Flag if productive plants are less than half the expected number
+        df_plants_incons_low = gdf_plants[gdf_plants['productiveplants'] < (gdf_plants['expected_plants'] / 2)]
+        for _, row in df_plants_incons_low.iterrows():
+            inconsistencies_list.append({
+                'Farmercode': row['Farmercode'],
+                'username': row.get('username', ''),
+                'inconsistency': "Productiveplants less than half expected per acre"
             })
 
     df_uganda_incons = gdf[gdf['geometry'].within(uganda_poly)]
