@@ -195,7 +195,9 @@ if not target_row.empty:
 
 # --- EXPORT UPDATED FORM AS EXCEL ---
 if st.button("Export Updated Form to Excel"):
-    export_df = gdf.copy()
+    # Convert the geometry back to latitude-longitude (EPSG:4326) before export
+    export_gdf = gdf.to_crs("EPSG:4326")
+    export_df = export_gdf.copy()
     export_df['geometry'] = export_df['geometry'].apply(lambda geom: geom.wkt)
     towrite = io.BytesIO()
     with pd.ExcelWriter(towrite, engine="xlsxwriter") as writer:
