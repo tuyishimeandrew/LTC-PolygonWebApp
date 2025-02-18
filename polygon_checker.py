@@ -279,11 +279,11 @@ if st.button("Check Overlaps & Inconsistencies"):
     df_code = df[df['Farmercode'] == selected_code].copy()
     gdf_code = gdf[gdf['Farmercode'] == selected_code].copy()
 
-    # Ensure Phone columns are numeric
+    # Convert Phone columns to text before checking
     if 'Phone' in df_code.columns:
-        df_code['Phone'] = pd.to_numeric(df_code['Phone'], errors='coerce')
+        df_code['Phone'] = df_code['Phone'].astype(str)
     if 'Phone_hidden' in df_code.columns:
-        df_code['Phone_hidden'] = pd.to_numeric(df_code['Phone_hidden'], errors='coerce')
+        df_code['Phone_hidden'] = df_code['Phone_hidden'].astype(str)
 
     required_inconsistency_cols = ['Farmercode', 'username', 'duration', 'Registered', 'Phone', 'Phone_hidden']
     missing_cols = [col for col in required_inconsistency_cols if col not in df.columns]
@@ -556,6 +556,9 @@ if st.button("Check Overlaps & Inconsistencies"):
                 'inconsistency': "Time < 15min but Registered == Yes"
             })
 
+        # Convert phone columns to text in the full dataframe as well
+        df['Phone'] = df['Phone'].astype(str)
+        df['Phone_hidden'] = df['Phone_hidden'].astype(str)
         df_phone_mismatch = df[df['Phone'] != df['Phone_hidden']]
         for _, row in df_phone_mismatch.iterrows():
             inconsistencies_list.append({
