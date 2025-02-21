@@ -6,7 +6,7 @@ from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 import io
 
-st.title("Latitude Polygon Overlap & Inconsistency Checker (Optimized & Extended)")
+st.title("Latitude Inspections Inconsistency Checker")
 
 # ---------------------------
 # FILE UPLOAD
