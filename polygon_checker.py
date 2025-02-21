@@ -2,13 +2,15 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 import io
 
-st.title("Latitude Polygon Overlap & Inconsistency Checker (Optimized)")
+st.title("Latitude Polygon Overlap & Inconsistency Checker (Optimized & Extended)")
 
-# --- Display Two Upload Areas Side-by-Side ---
+# ---------------------------
+# FILE UPLOAD
+# ---------------------------
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Main Inspection File")
@@ -19,7 +21,6 @@ with col2:
     redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)",
                                  type=["xlsx", "csv"], key="redo_upload")
 
-# --- Process Main File ---
 if main_file is None:
     st.info("Please upload the Main Inspection file and Redo file.")
     st.stop()
@@ -37,7 +38,6 @@ if 'Farmercode' not in df.columns or 'polygonplot' not in df.columns:
     st.error("The Main Inspection Form must contain 'Farmercode' and 'polygonplot' columns.")
     st.stop()
 
-# --- Process Redo File ---
 if redo_file is None:
     st.error("The Redo Polygon Form is mandatory. Please upload the Redo file.")
     st.stop()
@@ -76,10 +76,13 @@ else:
             df.loc[cond, new_col] = df.loc[cond, 'redo_polygonplot']
     df = df.drop(columns=['redo_selectplot', 'redo_polygonplot'])
 
-# --- Polygon Functions ---
+# ---------------------------
+# POLYGON HANDLING FUNCTIONS
+# ---------------------------
 def parse_polygon_z(polygon_str):
     if not isinstance(polygon_str, str):
         return None
+    # Only take X and Y (ignoring Z)
     vertices = [tuple(map(float, point.strip().split()[:2]))
                 for point in polygon_str.split(';') if point.strip() and len(point.split()) >= 3]
     return Polygon(vertices) if len(vertices) >= 3 else None
@@ -88,22 +91,28 @@ def combine_polygons(row):
     polys = [parse_polygon_z(row[col]) for col in ['polygonplot', 'polygonplotnew_1',
                                                     'polygonplotnew_2', 'polygonplotnew_3',
                                                     'polygonplotnew_4'] if col in row and pd.notna(row[col])]
-    valid_polys = [p if p.is_valid else p.buffer(0) for p in polys if p is not None and p.is_valid or p.buffer(0).is_valid]
+    valid_polys = []
+    for p in polys:
+        if p is not None:
+            if not p.is_valid:
+                p = p.buffer(0)
+            if p.is_valid:
+                valid_polys.append(p)
     if not valid_polys:
         return None
-    return valid_polys[0] if len(valid_polys) == 1 else unary_union(valid_polys)
+    return valid_polys[0] if len(valid_polys)==1 else unary_union(valid_polys)
 
-# Create geometry column and filter out rows with invalid geometry
 df['geometry'] = df.apply(combine_polygons, axis=1)
 df = df[df['geometry'].notna()]
 
-# Convert to GeoDataFrame and project to a planar CRS for area calculations
 gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
 gdf = gdf.to_crs('EPSG:2109')
 gdf['geometry'] = gdf['geometry'].buffer(0)
 gdf = gdf[gdf.is_valid]
 
-# --- Spatial Index Optimized Overlap Check ---
+# ---------------------------
+# SPATIAL INDEXED OVERLAP CHECK
+# ---------------------------
 def check_overlaps(gdf, target_code):
     target_row = gdf[gdf['Farmercode'] == target_code]
     if target_row.empty:
@@ -112,7 +121,6 @@ def check_overlaps(gdf, target_code):
     total_area = target_poly.area
     overlaps = []
     union_overlap = None
-    # Build spatial index for faster lookup
     sindex = gdf.sindex
     candidate_idxs = list(sindex.intersection(target_poly.bounds))
     for idx in candidate_idxs:
@@ -135,7 +143,9 @@ def check_overlaps(gdf, target_code):
     overall_pct = (union_overlap.area / total_area * 100) if union_overlap else 0
     return overlaps, overall_pct
 
-# --- Plotting Helper ---
+# ---------------------------
+# PLOTTING HELPER
+# ---------------------------
 def plot_geometry(ax, geom, color, label, text_label):
     if hasattr(geom, 'exterior'):
         x, y = geom.exterior.xy
@@ -150,35 +160,45 @@ def plot_geometry(ax, geom, color, label, text_label):
                 cx, cy = part.centroid.x, part.centroid.y
                 ax.text(cx, cy, f"{text_label:.1f}%", fontsize=10, color='white', ha='center', va='center')
 
-# --- Risk Rating System ---
+# ---------------------------
+# UPDATED RISK RATING FUNCTION
+# ---------------------------
 def get_risk_rating(inc_text):
     txt = inc_text.lower()
-    if "time < 15min" in txt or "overlap > 5%" in txt:
+    # High risk conditions
+    if ("time < 15min" in txt or 
+        "overlap > 10%" in txt or 
+        "more than 12 codes" in txt or 
+        "productiveplants" in txt):
         return "High"
-    if any(keyword in txt for keyword in ["phone mismatch", "duplicate phone", "duplicate farmer", "productiveplants exceed", "productiveplants less"]):
+    # Medium risk conditions
+    if ("overlap 5-10%" in txt or 
+        "gps is more than 100m" in txt):
+        return "Medium"
+    if any(kw in txt for kw in ["phone mismatch", "duplicate phone", "duplicate farmer"]):
         return "Medium"
     return "Low"
 
-# --- Inconsistency Detection (Vectorized) ---
-# Time Inconsistency
+# ---------------------------
+# INCONSISTENCY DETECTION (Vectorized)
+# ---------------------------
+# 1. Time Inconsistency
 df_time_incons = df.loc[(df['duration'] < 900) & (df['Registered'].str.lower()=='yes'), ['Farmercode','username']]
 df_time_incons = df_time_incons.assign(inconsistency="Time < 15min but Registered == Yes")
 
-# Phone Mismatch
+# 2. Phone Mismatch
 df['Phone'] = pd.to_numeric(df['Phone'], errors='coerce').fillna(0).astype(int).astype(str)
 df['Phone_hidden'] = pd.to_numeric(df['Phone_hidden'], errors='coerce').fillna(0).astype(int).astype(str)
 df_phone_incons = df.loc[df['Phone'] != df['Phone_hidden'], ['Farmercode','username']]
 df_phone_incons = df_phone_incons.assign(inconsistency="Phone mismatch (Phone != Phone_hidden)")
 
-# Duplicate Phone Entries
+# 3. Duplicate Phone Entries & Duplicate Farmer Codes
 df_dup_phones = df[df.duplicated(subset=['Phone'], keep=False)][['Farmercode','username']]
 df_dup_phones = df_dup_phones.assign(inconsistency="Duplicate phone entry")
-
-# Duplicate Farmer Codes
 df_dup_codes = df[df.duplicated(subset=['Farmercode'], keep=False)][['Farmercode','username']]
 df_dup_codes = df_dup_codes.assign(inconsistency="Duplicate Farmer code")
 
-# Productive Plants (high and low)
+# 4. Productive Plants (now flagged as high risk)
 if 'Productiveplants' in df.columns:
     gdf_plants = gdf.copy()
     gdf_plants['acres'] = gdf_plants.geometry.area * 0.000247105
@@ -194,11 +214,10 @@ else:
     df_prod_high = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
     df_prod_low = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 
-# Uganda Boundary Inconsistency
-# (Here we flag those plots that lie within the given Uganda boundary)
+# 5. Uganda Boundary
 uganda_coords = [
     (30.471786, -1.066837), (30.460829, -1.063428), (30.445614, -1.058694),
-    # ... (the full set of coordinates remains unchanged) ...
+    # ... (complete with your full list) ...
     (33.904214, -1.002573), (33.822255, -1.002573)
 ]
 uganda_poly = Polygon(uganda_coords)
@@ -206,32 +225,86 @@ gdf['in_uganda'] = gdf.geometry.within(uganda_poly)
 df_uganda_incons = gdf.loc[gdf['in_uganda'], ['Farmercode','username']]
 df_uganda_incons = pd.DataFrame(df_uganda_incons).assign(inconsistency="Plot lies within Uganda boundary")
 
-# Overlap > 5% across all codes
+# 6. Overlap (using updated thresholds)
 overlap_list = []
 for code in df['Farmercode'].unique():
     overlaps, overall_pct = check_overlaps(gdf, code)
-    if overall_pct > 5:
-        overlap_list.append({'Farmercode': code, 'username': "", 'inconsistency': "Overlap > 5%"})
+    if overall_pct > 10:
+        text = "Overlap > 10%"
+    elif overall_pct >= 5:
+        text = "Overlap 5-10%"
+    else:
+        text = None
+    if text:
+        overlap_list.append({'Farmercode': code, 'username': "", 'inconsistency': text})
 df_overlap_incons = pd.DataFrame(overlap_list)
 
-# Concatenate all inconsistency DataFrames
-inconsistencies_df = pd.concat([df_time_incons, df_phone_incons, df_dup_phones,
-                                df_dup_codes, df_prod_high, df_prod_low, df_uganda_incons,
-                                df_overlap_incons], ignore_index=True)
+# 7. More Than 12 Codes Collected in a Day
+if 'SubmissionDate' in df.columns:
+    df['SubmissionDate'] = pd.to_datetime(df['SubmissionDate'], errors='coerce').dt.date
+    group = df.groupby(['username', 'SubmissionDate']).size().reset_index(name='count')
+    high_code_groups = group[group['count'] > 12]
+    df_codes_collected = df.merge(high_code_groups[['username','SubmissionDate']], on=['username','SubmissionDate'], how='inner')
+    df_codes_collected = df_codes_collected[['Farmercode','username']].drop_duplicates()
+    df_codes_collected = df_codes_collected.assign(inconsistency="More than 12 codes collected in a day")
+else:
+    df_codes_collected = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 
-# Assign risk rating and trust flag
+# 8. GPS Distance Check (if gps columns exist)
+if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
+    def make_point(row):
+        try:
+            return Point(float(row['gps-Latitude']), float(row['gps-Longitude']))
+        except:
+            return None
+    gdf['gps_point'] = gdf.apply(make_point, axis=1)
+    # Convert these points to EPSG:2109 for distance calculation
+    if gdf['gps_point'].notna().sum() > 0:
+        gps_gs = gpd.GeoSeries(gdf['gps_point'].dropna(), crs="EPSG:4326").to_crs('EPSG:2109')
+        gdf.loc[gps_gs.index, 'gps_point_proj'] = gps_gs
+        gdf['gps_distance'] = gdf.apply(lambda row: row['gps_point_proj'].distance(row['geometry']) 
+                                        if pd.notnull(row.get('gps_point_proj')) else None, axis=1)
+        df_gps_incons = gdf.loc[gdf['gps_distance'] > 100, ['Farmercode','username']]
+        df_gps_incons = pd.DataFrame(df_gps_incons).assign(inconsistency="GPS is more than 100m from polygon")
+    else:
+        df_gps_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
+else:
+    df_gps_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
+
+# Concatenate all inconsistency DataFrames
+inconsistencies_df = pd.concat([
+    df_time_incons, df_phone_incons, df_dup_phones, df_dup_codes,
+    df_prod_high, df_prod_low, df_uganda_incons, df_overlap_incons,
+    df_codes_collected, df_gps_incons
+], ignore_index=True)
+
+# Assign risk ratings
 if not inconsistencies_df.empty:
     inconsistencies_df['Risk Rating'] = inconsistencies_df['inconsistency'].apply(get_risk_rating)
     inconsistencies_df['Trust Responses'] = inconsistencies_df['Risk Rating'].apply(lambda x: "No" if x=="High" else "Yes")
-    st.dataframe(inconsistencies_df)
 else:
-    st.write("No inconsistencies found.")
+    inconsistencies_df = pd.DataFrame(columns=['Farmercode','username','inconsistency','Risk Rating','Trust Responses'])
 
-# --- Merged Export Function ---
+# ---------------------------
+# TOP 5 INSPECTORS (Bar Chart)
+# ---------------------------
+if not inconsistencies_df.empty:
+    high_risks = inconsistencies_df[inconsistencies_df['Risk Rating'] == "High"]
+    top5 = high_risks.groupby('username').size().reset_index(name='HighRiskCount').sort_values(by='HighRiskCount', ascending=False).head(5)
+    st.subheader("Top 5 Inspectors with Most High Risks")
+    if not top5.empty:
+        st.bar_chart(top5.set_index('username'))
+    else:
+        st.write("No high risk records found for any inspector.")
+else:
+    st.write("No inconsistencies detected.")
+
+# ---------------------------
+# EXPORT (MERGED WITH RISK COLUMNS)
+# ---------------------------
 def export_with_inconsistencies_merged(main_gdf, inconsistencies_df):
     export_gdf = main_gdf.to_crs("EPSG:4326").copy()
     export_gdf['geometry'] = export_gdf['geometry'].apply(lambda geom: geom.wkt)
-    # Merge on Farmercode and username; fill defaults if no inconsistency found
     merged_df = export_gdf.merge(
         inconsistencies_df[['Farmercode','username','inconsistency','Risk Rating','Trust Responses']],
         on=['Farmercode','username'], how='left'
@@ -250,18 +323,18 @@ def export_with_inconsistencies_merged(main_gdf, inconsistencies_df):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-# --- UI: Overlap Map and Inconsistency Check for Selected Farmer ---
-farmer_codes = gdf['Farmercode'].dropna().unique().tolist()
-selected_code = st.selectbox("Select Farmer Code", farmer_codes)
+# ---------------------------
+# UI: Inspector-Specific Overlap Map & Area for a Selected Farmer
+# ---------------------------
+farmer_list = gdf['Farmercode'].dropna().unique().tolist()
+selected_code = st.selectbox("Select Farmer Code", farmer_list)
 
-# Display target polygon area
 target_row = gdf[gdf['Farmercode'] == selected_code]
 if not target_row.empty:
-    target_area = target_row.geometry.iloc[0].area
+    area = target_row.geometry.iloc[0].area
     st.subheader("Target Polygon Area:")
-    st.write(f"{target_area:.2f} m²")
+    st.write(f"{area:.2f} m²")
 
-# Overlap check for selected code (using optimized function)
 overlaps, overall_pct = check_overlaps(gdf, selected_code)
 st.subheader(f"Overlap Results for Farmer {selected_code}")
 if overlaps:
@@ -272,7 +345,6 @@ if overlaps:
 else:
     st.success("No overlaps found for this farmer.")
 
-# Plot overlap map if any overlaps exist
 if overlaps:
     target_poly = target_row.geometry.iloc[0]
     fig, ax = plt.subplots(figsize=(8,8))
@@ -284,14 +356,16 @@ if overlaps:
             x, y = part.exterior.xy
             ax.fill(x, y, alpha=0.5, fc='blue', ec='black', label=f"Target: {selected_code}")
     for res in overlaps:
-        plot_geometry(ax, res['intersection'], 'red', f"Overlap {res['Farmercode']}",
-                      res['overlap_area'] / res['total_area'] * 100)
+        overlap_pct = res['overlap_area'] / res['total_area'] * 100
+        plot_geometry(ax, res['intersection'], 'red', f"Overlap {res['Farmercode']}", overlap_pct)
     ax.set_title(f"Overlap Map for Farmer {selected_code}")
     ax.set_xlabel("Easting")
     ax.set_ylabel("Northing")
     ax.legend(loc='upper right', fontsize='small')
     st.pyplot(fig)
 
-# --- EXPORT Button ---
+# ---------------------------
+# EXPORT BUTTON (Merged)
+# ---------------------------
 if st.button("Export Updated Form to Excel (Merged with Risk Columns)"):
     export_with_inconsistencies_merged(gdf, inconsistencies_df)
