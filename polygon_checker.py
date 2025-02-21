@@ -14,12 +14,10 @@ st.title("Latitude Inspections Inconsistency Checker")
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Main Inspection File")
-    main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)",
-                                 type=["xlsx", "csv"], key="main_upload")
+    main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)", type=["xlsx", "csv"], key="main_upload")
 with col2:
     st.subheader("Redo Polygon File")
-    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)",
-                                 type=["xlsx", "csv"], key="redo_upload")
+    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)", type=["xlsx", "csv"], key="redo_upload")
 
 if main_file is None:
     st.info("Please upload the Main Inspection file and Redo file.")
@@ -63,8 +61,7 @@ else:
         df_redo = df_redo.groupby('Farmercode', as_index=False).last()
     df_redo = df_redo.rename(columns={'selectplot': 'redo_selectplot',
                                       'polygonplot': 'redo_polygonplot'})
-    df = df.merge(df_redo[['Farmercode', 'redo_selectplot', 'redo_polygonplot']],
-                  on='Farmercode', how='left')
+    df = df.merge(df_redo[['Farmercode', 'redo_selectplot', 'redo_polygonplot']], on='Farmercode', how='left')
     cond1 = df['polygonplot'].notna() & (df['redo_selectplot'] == 'Plot1')
     df.loc[cond1, 'polygonplot'] = df.loc[cond1, 'redo_polygonplot']
     for new_col, plot_val in [('polygonplotnew_1', 'Plot2'),
@@ -105,7 +102,7 @@ def combine_polygons(row):
 df['geometry'] = df.apply(combine_polygons, axis=1)
 df = df[df['geometry'].notna()]
 
-# Create GeoDataFrame then convert to EPSG:2109 for area computations
+# Create a GeoDataFrame and project to EPSG:2109 (Uganda projection)
 gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
 gdf = gdf.to_crs('EPSG:2109')
 gdf['geometry'] = gdf['geometry'].buffer(0)
@@ -166,7 +163,7 @@ def plot_geometry(ax, geom, color, label, text_label):
 # ---------------------------
 def get_risk_rating(inc_text):
     txt = inc_text.lower()
-    # If message contains any "high risk" keyword, return High
+    # If message contains "high risk", return High
     if "high risk" in txt:
          return "High"
     if ("time < 30min" in txt or 
@@ -180,6 +177,35 @@ def get_risk_rating(inc_text):
     if any(kw in txt for kw in ["phone mismatch", "duplicate phone", "duplicate farmer"]):
         return "Medium"
     return "Low"
+
+# ---------------------------
+# NEW: ID CHECK FUNCTION
+# ---------------------------
+def check_id_risk(row):
+    if pd.isnull(row.get('IDtype')):
+         return None
+    idtype = str(row['IDtype']).strip().lower()
+    idnum = str(row['IDnumber']).strip() if pd.notnull(row['IDnumber']) else ""
+    gender = str(row['Gender']).strip().lower() if pd.notnull(row['Gender']) else ""
+    if idtype == "national_id":
+         if not (idnum.startswith("CM") or idnum.startswith("CF")):
+              return "ID check high risk: For national_ID, IDnumber does not start with CM or CF"
+         if len(idnum) != 14:
+              return "ID check medium risk: For national_ID, IDnumber length is not 14"
+         if gender == "male" and not idnum.startswith("CM"):
+              return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
+         if gender == "female" and not idnum.startswith("CF"):
+              return "ID check high risk: For national_ID with Female, IDnumber must start with CF"
+         return None
+    else:
+         return "ID check low risk: Non-national_ID provided"
+
+id_incons_list = []
+for idx, row in df.iterrows():
+    msg = check_id_risk(row)
+    if msg:
+         id_incons_list.append({'Farmercode': row['Farmercode'], 'username': row['username'], 'inconsistency': msg})
+df_id_incons = pd.DataFrame(id_incons_list)
 
 # ---------------------------
 # NEW: Additional Chemical/Heavy Machinery Inconsistency Check
@@ -455,8 +481,6 @@ for code in df['Farmercode'].unique():
         overlap_list.append({'Farmercode': code, 'username': "", 'inconsistency': text})
 df_overlap_incons = pd.DataFrame(overlap_list)
 
-# (Removed the "More Than 12 Codes Collected" check as per latest instructions)
-
 # 8. GPS Distance Check (if gps columns exist)
 if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
     def make_point(row):
@@ -529,7 +553,7 @@ if 'noncompliancesfound' in df.columns:
 else:
     df_chem_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 
-# Concatenate all inconsistencies
+# Concatenate all inconsistencies (including overlaps)
 inconsistencies_df = pd.concat([
     df_time_incons, df_phone_incons, df_dup_phones, df_dup_codes,
     df_prod_high, df_prod_low, df_uganda_incons, df_overlap_incons,
@@ -554,17 +578,17 @@ else:
 # ---------------------------
 # TOP 10 INSPECTORS BAR CHART
 # ---------------------------
-# Calculate total unique Farmercodes per inspector from the main df
+# Calculate total unique Farmercodes per inspector from main df
 total_per_inspector = df.groupby('username')['Farmercode'].nunique().reset_index(name='TotalCodes')
-# From aggregated inconsistencies, take only High risk rows and count unique Farmercodes per inspector
+# From aggregated inconsistencies, count unique Farmercodes with High risk per inspector
 high_risk_inspector = agg_incons[agg_incons['Risk Rating'] == "High"]
 high_per_inspector = high_risk_inspector.groupby('username')['Farmercode'].nunique().reset_index(name='HighRiskCodes')
 inspector_counts = total_per_inspector.merge(high_per_inspector, on='username', how='left').fillna(0)
 inspector_counts['HighRiskCodes'] = inspector_counts['HighRiskCodes'].astype(int)
-# Sort inspectors by total unique codes and take top 10
+# Sort inspectors by TotalCodes and take top 10
 top10 = inspector_counts.sort_values(by='TotalCodes', ascending=False).head(10)
 
-st.subheader("Suspicious Inspectors: High Risk Inspections vs Total Inspections")
+st.subheader("Suspicious Inspectors: High Risk Inspections  vs Total Inspections")
 if not top10.empty:
     fig, ax = plt.subplots(figsize=(10,6))
     x = range(len(top10))
@@ -573,15 +597,15 @@ if not top10.empty:
     ax.bar([p + width for p in x], top10['HighRiskCodes'], width, label='High Risk Codes', color='red')
     ax.set_xticks([p + width/2 for p in x])
     ax.set_xticklabels(top10['username'], rotation=45, ha='right')
-    ax.set_ylabel("Number of Farmer Codes Inspected")
-    ax.set_title("High Risk Inspections vs Total Inspections")
+    ax.set_ylabel("Number of Inspections")
+    ax.set_title("Unique High Risk vs Total Codes per Inspector")
     ax.legend()
     st.pyplot(fig)
 else:
     st.write("No inspector data available for the bar chart.")
 
 # ---------------------------
-# UI: Show All Aggregated Inconsistencies for a Selected Code
+# UI: Show Aggregated Inconsistencies for a Selected Code
 # ---------------------------
 farmer_list = gdf['Farmercode'].dropna().unique().tolist()
 selected_code = st.selectbox("Select Farmer Code", farmer_list)
