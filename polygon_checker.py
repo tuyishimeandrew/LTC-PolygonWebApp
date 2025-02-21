@@ -105,7 +105,7 @@ def combine_polygons(row):
 df['geometry'] = df.apply(combine_polygons, axis=1)
 df = df[df['geometry'].notna()]
 
-# Create a GeoDataFrame using the current CRS (EPSG:4326) and then convert to EPSG:2109 (Uganda projection)
+# Create GeoDataFrame then convert to EPSG:2109 for area computations
 gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
 gdf = gdf.to_crs('EPSG:2109')
 gdf['geometry'] = gdf['geometry'].buffer(0)
@@ -166,16 +166,12 @@ def plot_geometry(ax, geom, color, label, text_label):
 # ---------------------------
 def get_risk_rating(inc_text):
     txt = inc_text.lower()
-    # New ID check messages are handled in check_id_risk
-    if "id check high risk" in txt:
+    # If message contains any "high risk" keyword, return High
+    if "high risk" in txt:
          return "High"
-    if "id check medium risk" in txt:
-         return "Medium"
-    if "id check low risk" in txt:
-         return "Low"
-    # Existing rules:
     if ("time < 30min" in txt or 
         "overlap > 10%" in txt or 
+        "more than 12 codes" in txt or 
         "productiveplants" in txt):
         return "High"
     if ("overlap 5-10%" in txt or 
@@ -186,42 +182,36 @@ def get_risk_rating(inc_text):
     return "Low"
 
 # ---------------------------
-# NEW: ID CHECK FUNCTION (Corrected Logic)
+# NEW: Additional Chemical/Heavy Machinery Inconsistency Check
 # ---------------------------
-def check_id_risk(row):
-    # If IDtype is "national_ID" (case-insensitive)
-    if pd.isnull(row.get('IDtype')):
-         return None
-    idtype = str(row['IDtype']).strip().lower()
-    idnum = str(row['IDnumber']).strip() if pd.notnull(row['IDnumber']) else ""
-    gender = str(row['Gender']).strip().lower() if pd.notnull(row['Gender']) else ""
-    if idtype == "national_id":
-         # If IDnumber does not start with "CM" or "CF", high risk.
-         if not (idnum.startswith("CM") or idnum.startswith("CF")):
-              return "ID check high risk: For national_ID, IDnumber does not start with CM or CF"
-         # If it does start with one of these prefixes but its length is not exactly 14, medium risk.
-         if len(idnum) != 14:
-              return "ID check medium risk: For national_ID, IDnumber length is not 14"
-         # Additionally, based on Gender:
-         if gender == "male" and not idnum.startswith("CM"):
-              return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
-         if gender == "female" and not idnum.startswith("CF"):
-              return "ID check high risk: For national_ID with Female, IDnumber must start with CF"
-         return None
-    else:
-         return "ID check low risk: Non-national_ID provided"
-
-id_incons_list = []
-for idx, row in df.iterrows():
-    msg = check_id_risk(row)
-    if msg:
-         id_incons_list.append({'Farmercode': row['Farmercode'], 'username': row['username'], 'inconsistency': msg})
-df_id_incons = pd.DataFrame(id_incons_list)
+cols_to_check = [
+    'methodspestdiseasemanagement_using_chemicals',
+    'agriculturalinputs_synthetic_chemicals_or_fertilize',
+    'fertilizerchemicals_Inorganic_fertilizer',
+    'fertilizerchemicals_Pesticides',
+    'fertilizerchemicals_Fungicides',
+    'fertilizerchemicals_Herbicides',
+    'childrenlabouractivities_spraying_of_chemicals',
+    'childrenlabouractivities_operating_of_heavy_machines'
+]
+if 'noncompliancesfound' in df.columns:
+    mask = df['noncompliancesfound'].str.lower() == "none_of_the_above"
+    df_chem_incons = df[mask].copy()
+    for col in cols_to_check:
+        if col in df_chem_incons.columns:
+            df_chem_incons[col] = pd.to_numeric(df_chem_incons[col], errors='coerce').fillna(0)
+        else:
+            df_chem_incons[col] = 0
+    condition = (df_chem_incons[cols_to_check] == 1).any(axis=1)
+    df_chem_incons = df_chem_incons[condition][['Farmercode','username']]
+    df_chem_incons = df_chem_incons.assign(inconsistency="High risk: noncompliancesfound is none_of_the_above but chemical/heavy machinery used")
+else:
+    df_chem_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 
 # ---------------------------
 # INCONSISTENCY DETECTION (Vectorized)
 # ---------------------------
-# 1. Time Inconsistency (Threshold increased to 30 minutes = 1800 seconds)
+# 1. Time Inconsistency (Threshold: 30 minutes = 1800 seconds)
 df_time_incons = df.loc[(df['duration'] < 1800) & (df['Registered'].str.lower()=='yes'), ['Farmercode','username']]
 df_time_incons = df_time_incons.assign(inconsistency="Time < 30min but Registered == Yes")
 
@@ -465,7 +455,7 @@ for code in df['Farmercode'].unique():
         overlap_list.append({'Farmercode': code, 'username': "", 'inconsistency': text})
 df_overlap_incons = pd.DataFrame(overlap_list)
 
-# (Removed the "More Than 12 Codes Collected" check)
+# (Removed the "More Than 12 Codes Collected" check as per latest instructions)
 
 # 8. GPS Distance Check (if gps columns exist)
 if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
@@ -514,11 +504,36 @@ for idx, row in df.iterrows():
          id_incons_list.append({'Farmercode': row['Farmercode'], 'username': row['username'], 'inconsistency': msg})
 df_id_incons = pd.DataFrame(id_incons_list)
 
+# NEW: Additional Chemical/Heavy Machinery Inconsistency Check
+cols_to_check = [
+    'methodspestdiseasemanagement_using_chemicals',
+    'agriculturalinputs_synthetic_chemicals_or_fertilize',
+    'fertilizerchemicals_Inorganic_fertilizer',
+    'fertilizerchemicals_Pesticides',
+    'fertilizerchemicals_Fungicides',
+    'fertilizerchemicals_Herbicides',
+    'childrenlabouractivities_spraying_of_chemicals',
+    'childrenlabouractivities_operating_of_heavy_machines'
+]
+if 'noncompliancesfound' in df.columns:
+    mask = df['noncompliancesfound'].str.lower() == "none_of_the_above"
+    df_chem_incons = df[mask].copy()
+    for col in cols_to_check:
+        if col in df_chem_incons.columns:
+            df_chem_incons[col] = pd.to_numeric(df_chem_incons[col], errors='coerce').fillna(0)
+        else:
+            df_chem_incons[col] = 0
+    condition = (df_chem_incons[cols_to_check] == 1).any(axis=1)
+    df_chem_incons = df_chem_incons[condition][['Farmercode','username']]
+    df_chem_incons = df_chem_incons.assign(inconsistency="High risk: noncompliancesfound is none_of_the_above but chemical/heavy machinery used")
+else:
+    df_chem_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
+
 # Concatenate all inconsistencies
 inconsistencies_df = pd.concat([
     df_time_incons, df_phone_incons, df_dup_phones, df_dup_codes,
     df_prod_high, df_prod_low, df_uganda_incons, df_overlap_incons,
-    df_gps_incons, df_id_incons
+    df_gps_incons, df_id_incons, df_chem_incons
 ], ignore_index=True)
 
 # ---------------------------
@@ -537,11 +552,11 @@ else:
     agg_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency','Risk Rating','Trust Responses'])
 
 # ---------------------------
-# TOP 10 INSPECTORS (Bar Chart)
+# TOP 10 INSPECTORS BAR CHART
 # ---------------------------
 # Calculate total unique Farmercodes per inspector from the main df
 total_per_inspector = df.groupby('username')['Farmercode'].nunique().reset_index(name='TotalCodes')
-# From aggregated inconsistencies, take only High risk rows and count unique codes per inspector
+# From aggregated inconsistencies, take only High risk rows and count unique Farmercodes per inspector
 high_risk_inspector = agg_incons[agg_incons['Risk Rating'] == "High"]
 high_per_inspector = high_risk_inspector.groupby('username')['Farmercode'].nunique().reset_index(name='HighRiskCodes')
 inspector_counts = total_per_inspector.merge(high_per_inspector, on='username', how='left').fillna(0)
@@ -558,15 +573,15 @@ if not top10.empty:
     ax.bar([p + width for p in x], top10['HighRiskCodes'], width, label='High Risk Codes', color='red')
     ax.set_xticks([p + width/2 for p in x])
     ax.set_xticklabels(top10['username'], rotation=45, ha='right')
-    ax.set_ylabel("Number of Unique Farmer Codes")
-    ax.set_title("Unique High Risk vs Total Codes per Inspector")
+    ax.set_ylabel("Number of Farmer Codes Inspected")
+    ax.set_title("High Risk Inspections vs Total Inspections")
     ax.legend()
     st.pyplot(fig)
 else:
     st.write("No inspector data available for the bar chart.")
 
 # ---------------------------
-# UI: Show All Inconsistencies for a Selected Code
+# UI: Show All Aggregated Inconsistencies for a Selected Code
 # ---------------------------
 farmer_list = gdf['Farmercode'].dropna().unique().tolist()
 selected_code = st.selectbox("Select Farmer Code", farmer_list)
@@ -614,12 +629,11 @@ if overlaps:
     st.pyplot(fig)
 
 # ---------------------------
-# EXPORT (MERGED WITH RISK COLUMNS & Computed Area in Acres)
+# EXPORT (MERGED WITH AGGREGATED RISK COLUMNS & Computed Area)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
-    # We'll compute the area in acres using the original gdf (which is in EPSG:2109)
+    # Compute area in acres using conversion factor (1 m² = 0.000247105 acres)
     export_gdf = main_gdf.copy()
-    # Compute acres using the conversion factor (1 m² = 0.000247105 acres)
     export_gdf['Acres'] = export_gdf['geometry'].area * 0.000247105
     # Convert geometry to WKT for export
     export_gdf['geometry'] = export_gdf['geometry'].apply(lambda geom: geom.wkt)
