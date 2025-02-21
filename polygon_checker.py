@@ -14,11 +14,11 @@ st.title("Latitude Inspections Inconsistency Checker")
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Main Inspection File")
-    main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)",
+    main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)", 
                                  type=["xlsx", "csv"], key="main_upload")
 with col2:
     st.subheader("Redo Polygon File")
-    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)",
+    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)", 
                                  type=["xlsx", "csv"], key="redo_upload")
 
 if main_file is None:
@@ -163,14 +163,15 @@ def plot_geometry(ax, geom, color, label, text_label):
 # ---------------------------
 # UPDATED RISK RATING FUNCTION
 # ---------------------------
-# Risk order: High > Medium > Low
 def get_risk_rating(inc_text):
     txt = inc_text.lower()
+    # High risk if text contains any of these keywords
     if ("time < 15min" in txt or 
         "overlap > 10%" in txt or 
         "more than 12 codes" in txt or 
         "productiveplants" in txt):
         return "High"
+    # Medium risk if text contains these phrases
     if ("overlap 5-10%" in txt or 
         "gps is more than 100m" in txt):
         return "Medium"
@@ -466,17 +467,19 @@ inconsistencies_df = pd.concat([
 # ---------------------------
 # AGGREGATE INCONSISTENCIES PER RECORD
 # ---------------------------
-# Group by Farmercode and username and join all inconsistency texts.
-# Also, select the highest risk rating among the issues.
+# We group by Farmercode and username and join all inconsistency texts.
+# Also, we select the highest risk rating among the issues.
 risk_order = {"High": 3, "Medium": 2, "Low": 1, "None": 0}
 
 if not inconsistencies_df.empty:
-    # Assign risk rating for each row.
+    # First, assign risk rating for each row.
     inconsistencies_df['Risk Rating'] = inconsistencies_df['inconsistency'].apply(get_risk_rating)
+    # We'll aggregate per (Farmercode, username)
     agg_incons = inconsistencies_df.groupby(['Farmercode','username'], as_index=False).agg({
         'inconsistency': lambda x: ", ".join(x.unique()),
-        'Risk Rating': lambda x: max(x, key=lambda r: risk_order.get(r, 0))
+        'Risk Rating': lambda x: max(x, key=lambda r: risk_order.get(r,0))
     })
+    # For trust responses: if aggregated risk rating is High, then "No", else "Yes"
     agg_incons['Trust Responses'] = agg_incons['Risk Rating'].apply(lambda x: "No" if x=="High" else "Yes")
 else:
     agg_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency','Risk Rating','Trust Responses'])
@@ -497,11 +500,12 @@ else:
     st.write("No inconsistencies detected.")
 
 # ---------------------------
-# UI: Show All Aggregated Inconsistencies for a Selected Code
+# UI: Show All Inconsistencies for a Selected Code
 # ---------------------------
 farmer_list = gdf['Farmercode'].dropna().unique().tolist()
 selected_code = st.selectbox("Select Farmer Code", farmer_list)
 
+# Show all aggregated inconsistencies for this code (if any)
 selected_incons = agg_incons[agg_incons['Farmercode'] == selected_code]
 st.subheader(f"Inconsistencies for Farmer {selected_code}")
 if not selected_incons.empty:
@@ -509,7 +513,7 @@ if not selected_incons.empty:
 else:
     st.write("No inconsistencies found for this code.")
 
-# Also show overlap details
+# Also show overlap information as part of all inconsistencies
 target_row = gdf[gdf['Farmercode'] == selected_code]
 if not target_row.empty:
     area = target_row.geometry.iloc[0].area
@@ -551,6 +555,7 @@ if overlaps:
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     export_gdf = main_gdf.to_crs("EPSG:4326").copy()
     export_gdf['geometry'] = export_gdf['geometry'].apply(lambda geom: geom.wkt)
+    # Merge aggregated inconsistency info on Farmercode and username
     merged_df = export_gdf.merge(
         agg_incons_df[['Farmercode','username','inconsistency','Risk Rating','Trust Responses']],
         on=['Farmercode','username'], how='left'
