@@ -564,7 +564,7 @@ inspector_counts['HighRiskCodes'] = inspector_counts['HighRiskCodes'].astype(int
 # Sort inspectors by total unique codes and take top 10
 top10 = inspector_counts.sort_values(by='TotalCodes', ascending=False).head(10)
 
-st.subheader("Top 10 Inspectors: High Risk vs Total Unique Codes")
+st.subheader("Suspicious Inspectors: High Risk Inspections vs Total Inspections")
 if not top10.empty:
     fig, ax = plt.subplots(figsize=(10,6))
     x = range(len(top10))
