@@ -105,6 +105,7 @@ def combine_polygons(row):
 df['geometry'] = df.apply(combine_polygons, axis=1)
 df = df[df['geometry'].notna()]
 
+# Create a GeoDataFrame using the current CRS (EPSG:4326) and then convert to EPSG:2109 (Uganda projection)
 gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
 gdf = gdf.to_crs('EPSG:2109')
 gdf['geometry'] = gdf['geometry'].buffer(0)
@@ -188,16 +189,20 @@ def get_risk_rating(inc_text):
 # NEW: ID CHECK FUNCTION (Corrected Logic)
 # ---------------------------
 def check_id_risk(row):
+    # If IDtype is "national_ID" (case-insensitive)
     if pd.isnull(row.get('IDtype')):
          return None
     idtype = str(row['IDtype']).strip().lower()
     idnum = str(row['IDnumber']).strip() if pd.notnull(row['IDnumber']) else ""
     gender = str(row['Gender']).strip().lower() if pd.notnull(row['Gender']) else ""
     if idtype == "national_id":
+         # If IDnumber does not start with "CM" or "CF", high risk.
          if not (idnum.startswith("CM") or idnum.startswith("CF")):
               return "ID check high risk: For national_ID, IDnumber does not start with CM or CF"
+         # If it does start with one of these prefixes but its length is not exactly 14, medium risk.
          if len(idnum) != 14:
               return "ID check medium risk: For national_ID, IDnumber length is not 14"
+         # Additionally, based on Gender:
          if gender == "male" and not idnum.startswith("CM"):
               return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
          if gender == "female" and not idnum.startswith("CF"):
@@ -460,7 +465,7 @@ for code in df['Farmercode'].unique():
         overlap_list.append({'Farmercode': code, 'username': "", 'inconsistency': text})
 df_overlap_incons = pd.DataFrame(overlap_list)
 
-# 7. (Removed the "More Than 12 Codes Collected" check)
+# (Removed the "More Than 12 Codes Collected" check)
 
 # 8. GPS Distance Check (if gps columns exist)
 if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
@@ -578,7 +583,7 @@ if not target_row.empty:
     area = target_row.geometry.iloc[0].area
     st.subheader("Target Polygon Area:")
     st.write(f"{area:.2f} m²")
-
+    
 overlaps, overall_pct = check_overlaps(gdf, selected_code)
 st.subheader(f"Overlap Results for Farmer {selected_code}")
 if overlaps:
@@ -609,10 +614,14 @@ if overlaps:
     st.pyplot(fig)
 
 # ---------------------------
-# EXPORT (MERGED WITH RISK COLUMNS)
+# EXPORT (MERGED WITH RISK COLUMNS & Computed Area in Acres)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
-    export_gdf = main_gdf.to_crs("EPSG:4326").copy()
+    # We'll compute the area in acres using the original gdf (which is in EPSG:2109)
+    export_gdf = main_gdf.copy()
+    # Compute acres using the conversion factor (1 m² = 0.000247105 acres)
+    export_gdf['Acres'] = export_gdf['geometry'].area * 0.000247105
+    # Convert geometry to WKT for export
     export_gdf['geometry'] = export_gdf['geometry'].apply(lambda geom: geom.wkt)
     merged_df = export_gdf.merge(
         agg_incons_df[['Farmercode','username','inconsistency','Risk Rating','Trust Responses']],
