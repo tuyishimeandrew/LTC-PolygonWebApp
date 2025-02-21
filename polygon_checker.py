@@ -165,19 +165,55 @@ def plot_geometry(ax, geom, color, label, text_label):
 # ---------------------------
 def get_risk_rating(inc_text):
     txt = inc_text.lower()
-    # High risk if text contains any of these keywords
+    # New ID check messages are handled in check_id_risk
+    if "id check high risk" in txt:
+         return "High"
+    if "id check medium risk" in txt:
+         return "Medium"
+    if "id check low risk" in txt:
+         return "Low"
+    # Existing rules:
     if ("time < 15min" in txt or 
         "overlap > 10%" in txt or 
         "more than 12 codes" in txt or 
         "productiveplants" in txt):
         return "High"
-    # Medium risk if text contains these phrases
     if ("overlap 5-10%" in txt or 
         "gps is more than 100m" in txt):
         return "Medium"
     if any(kw in txt for kw in ["phone mismatch", "duplicate phone", "duplicate farmer"]):
         return "Medium"
     return "Low"
+
+# ---------------------------
+# NEW: ID CHECK FUNCTION (Corrected Logic)
+# ---------------------------
+def check_id_risk(row):
+    # If IDtype is "national_ID" (case-insensitive)
+    if pd.isnull(row.get('IDtype')):
+         return None
+    idtype = str(row['IDtype']).strip().lower()
+    idnum = str(row['IDnumber']).strip() if pd.notnull(row['IDnumber']) else ""
+    gender = str(row['Gender']).strip().lower() if pd.notnull(row['Gender']) else ""
+    if idtype == "national_id":
+         if not (idnum.startswith("CM") or idnum.startswith("CF")):
+              return "ID check high risk: For national_ID, IDnumber does not start with CM or CF"
+         if len(idnum) != 14:
+              return "ID check medium risk: For national_ID, IDnumber length is not 14"
+         if gender == "male" and not idnum.startswith("CM"):
+              return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
+         if gender == "female" and not idnum.startswith("CF"):
+              return "ID check high risk: For national_ID with Female, IDnumber must start with CF"
+         return None  # No risk if all conditions are met.
+    else:
+         return "ID check low risk: Non-national_ID provided"
+
+id_incons_list = []
+for idx, row in df.iterrows():
+    msg = check_id_risk(row)
+    if msg:
+         id_incons_list.append({'Farmercode': row['Farmercode'], 'username': row['username'], 'inconsistency': msg})
+df_id_incons = pd.DataFrame(id_incons_list)
 
 # ---------------------------
 # INCONSISTENCY DETECTION (Vectorized)
@@ -457,29 +493,54 @@ if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
 else:
     df_gps_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 
+# NEW: ID Check with Corrected Logic
+def check_id_risk(row):
+    if pd.isnull(row.get('IDtype')):
+         return None
+    idtype = str(row['IDtype']).strip().lower()
+    idnum = str(row['IDnumber']).strip() if pd.notnull(row['IDnumber']) else ""
+    gender = str(row['Gender']).strip().lower() if pd.notnull(row['Gender']) else ""
+    if idtype == "national_id":
+         # If IDnumber does not start with "CM" or "CF", high risk.
+         if not (idnum.startswith("CM") or idnum.startswith("CF")):
+              return "ID check high risk: For national_ID, IDnumber does not start with CM or CF"
+         # If it starts correctly but length is not exactly 14, then medium risk.
+         if len(idnum) != 14:
+              return "ID check medium risk: For national_ID, IDnumber length is not 14"
+         # Additionally, based on Gender:
+         if gender == "male" and not idnum.startswith("CM"):
+              return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
+         if gender == "female" and not idnum.startswith("CF"):
+              return "ID check high risk: For national_ID with Female, IDnumber must start with CF"
+         return None
+    else:
+         return "ID check low risk: Non-national_ID provided"
+
+id_incons_list = []
+for idx, row in df.iterrows():
+    msg = check_id_risk(row)
+    if msg:
+         id_incons_list.append({'Farmercode': row['Farmercode'], 'username': row['username'], 'inconsistency': msg})
+df_id_incons = pd.DataFrame(id_incons_list)
+
 # Concatenate all inconsistencies
 inconsistencies_df = pd.concat([
     df_time_incons, df_phone_incons, df_dup_phones, df_dup_codes,
     df_prod_high, df_prod_low, df_uganda_incons, df_overlap_incons,
-    df_codes_collected, df_gps_incons
+    df_codes_collected, df_gps_incons, df_id_incons
 ], ignore_index=True)
 
 # ---------------------------
 # AGGREGATE INCONSISTENCIES PER RECORD
 # ---------------------------
-# We group by Farmercode and username and join all inconsistency texts.
-# Also, we select the highest risk rating among the issues.
 risk_order = {"High": 3, "Medium": 2, "Low": 1, "None": 0}
 
 if not inconsistencies_df.empty:
-    # First, assign risk rating for each row.
     inconsistencies_df['Risk Rating'] = inconsistencies_df['inconsistency'].apply(get_risk_rating)
-    # We'll aggregate per (Farmercode, username)
     agg_incons = inconsistencies_df.groupby(['Farmercode','username'], as_index=False).agg({
         'inconsistency': lambda x: ", ".join(x.unique()),
         'Risk Rating': lambda x: max(x, key=lambda r: risk_order.get(r,0))
     })
-    # For trust responses: if aggregated risk rating is High, then "No", else "Yes"
     agg_incons['Trust Responses'] = agg_incons['Risk Rating'].apply(lambda x: "No" if x=="High" else "Yes")
 else:
     agg_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency','Risk Rating','Trust Responses'])
@@ -519,7 +580,6 @@ else:
 farmer_list = gdf['Farmercode'].dropna().unique().tolist()
 selected_code = st.selectbox("Select Farmer Code", farmer_list)
 
-# Show all aggregated inconsistencies for this code (if any)
 selected_incons = agg_incons[agg_incons['Farmercode'] == selected_code]
 st.subheader(f"Inconsistencies for Farmer {selected_code}")
 if not selected_incons.empty:
@@ -527,7 +587,6 @@ if not selected_incons.empty:
 else:
     st.write("No inconsistencies found for this code.")
 
-# Also show overlap information as part of all inconsistencies
 target_row = gdf[gdf['Farmercode'] == selected_code]
 if not target_row.empty:
     area = target_row.geometry.iloc[0].area
@@ -569,7 +628,6 @@ if overlaps:
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     export_gdf = main_gdf.to_crs("EPSG:4326").copy()
     export_gdf['geometry'] = export_gdf['geometry'].apply(lambda geom: geom.wkt)
-    # Merge aggregated inconsistency info on Farmercode and username
     merged_df = export_gdf.merge(
         agg_incons_df[['Farmercode','username','inconsistency','Risk Rating','Trust Responses']],
         on=['Farmercode','username'], how='left'
