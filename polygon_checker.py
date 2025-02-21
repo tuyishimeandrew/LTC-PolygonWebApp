@@ -487,17 +487,31 @@ else:
 # ---------------------------
 # TOP 10 INSPECTORS (Bar Chart)
 # ---------------------------
-if not inconsistencies_df.empty:
-    high_risks = inconsistencies_df[inconsistencies_df['Risk Rating'] == "High"]
-    high_risks = high_risks.dropna(subset=['username'])
-    top10 = high_risks.groupby('username').size().reset_index(name='HighRiskCount').sort_values(by='HighRiskCount', ascending=False).head(10)
-    st.subheader("Top 10 Inspectors with Most High Risks")
-    if not top10.empty:
-        st.bar_chart(top10.set_index('username'))
-    else:
-        st.write("No high risk records found for any inspector.")
+# Calculate total unique Farmercodes per inspector from the main df
+total_per_inspector = df.groupby('username')['Farmercode'].nunique().reset_index(name='TotalCodes')
+# From aggregated inconsistencies, take only High risk rows and count unique codes per inspector
+high_risk_inspector = agg_incons[agg_incons['Risk Rating'] == "High"]
+high_per_inspector = high_risk_inspector.groupby('username')['Farmercode'].nunique().reset_index(name='HighRiskCodes')
+inspector_counts = total_per_inspector.merge(high_per_inspector, on='username', how='left').fillna(0)
+inspector_counts['HighRiskCodes'] = inspector_counts['HighRiskCodes'].astype(int)
+# Sort inspectors by total unique codes and take top 10
+top10 = inspector_counts.sort_values(by='TotalCodes', ascending=False).head(10)
+
+st.subheader("Top 10 Inspectors: High Risk vs Total Unique Codes")
+if not top10.empty:
+    fig, ax = plt.subplots(figsize=(10,6))
+    x = range(len(top10))
+    width = 0.35
+    ax.bar(x, top10['TotalCodes'], width, label='Total Unique Codes', color='lightblue')
+    ax.bar([p + width for p in x], top10['HighRiskCodes'], width, label='High Risk Codes', color='red')
+    ax.set_xticks([p + width/2 for p in x])
+    ax.set_xticklabels(top10['username'], rotation=45, ha='right')
+    ax.set_ylabel("Number of Unique Farmer Codes")
+    ax.set_title("Unique High Risk vs Total Codes per Inspector")
+    ax.legend()
+    st.pyplot(fig)
 else:
-    st.write("No inconsistencies detected.")
+    st.write("No inspector data available for the bar chart.")
 
 # ---------------------------
 # UI: Show All Inconsistencies for a Selected Code
