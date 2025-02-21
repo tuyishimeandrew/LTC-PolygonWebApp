@@ -14,11 +14,11 @@ st.title("Latitude Inspections Inconsistency Checker")
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Main Inspection File")
-    main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)", 
+    main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)",
                                  type=["xlsx", "csv"], key="main_upload")
 with col2:
     st.subheader("Redo Polygon File")
-    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)", 
+    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)",
                                  type=["xlsx", "csv"], key="redo_upload")
 
 if main_file is None:
@@ -173,9 +173,8 @@ def get_risk_rating(inc_text):
     if "id check low risk" in txt:
          return "Low"
     # Existing rules:
-    if ("time < 15min" in txt or 
+    if ("time < 30min" in txt or 
         "overlap > 10%" in txt or 
-        "more than 12 codes" in txt or 
         "productiveplants" in txt):
         return "High"
     if ("overlap 5-10%" in txt or 
@@ -189,7 +188,6 @@ def get_risk_rating(inc_text):
 # NEW: ID CHECK FUNCTION (Corrected Logic)
 # ---------------------------
 def check_id_risk(row):
-    # If IDtype is "national_ID" (case-insensitive)
     if pd.isnull(row.get('IDtype')):
          return None
     idtype = str(row['IDtype']).strip().lower()
@@ -204,7 +202,7 @@ def check_id_risk(row):
               return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
          if gender == "female" and not idnum.startswith("CF"):
               return "ID check high risk: For national_ID with Female, IDnumber must start with CF"
-         return None  # No risk if all conditions are met.
+         return None
     else:
          return "ID check low risk: Non-national_ID provided"
 
@@ -218,9 +216,9 @@ df_id_incons = pd.DataFrame(id_incons_list)
 # ---------------------------
 # INCONSISTENCY DETECTION (Vectorized)
 # ---------------------------
-# 1. Time Inconsistency
-df_time_incons = df.loc[(df['duration'] < 900) & (df['Registered'].str.lower()=='yes'), ['Farmercode','username']]
-df_time_incons = df_time_incons.assign(inconsistency="Time < 15min but Registered == Yes")
+# 1. Time Inconsistency (Threshold increased to 30 minutes = 1800 seconds)
+df_time_incons = df.loc[(df['duration'] < 1800) & (df['Registered'].str.lower()=='yes'), ['Farmercode','username']]
+df_time_incons = df_time_incons.assign(inconsistency="Time < 30min but Registered == Yes")
 
 # 2. Phone Mismatch
 df['Phone'] = pd.to_numeric(df['Phone'], errors='coerce').fillna(0).astype(int).astype(str)
@@ -462,16 +460,7 @@ for code in df['Farmercode'].unique():
         overlap_list.append({'Farmercode': code, 'username': "", 'inconsistency': text})
 df_overlap_incons = pd.DataFrame(overlap_list)
 
-# 7. More Than 12 Codes Collected in a Day (High risk)
-if 'SubmissionDate' in df.columns:
-    df['SubmissionDate'] = pd.to_datetime(df['SubmissionDate'], errors='coerce').dt.date
-    group = df.groupby(['username', 'SubmissionDate']).size().reset_index(name='count')
-    high_code_groups = group[group['count'] > 12]
-    df_codes_collected = df.merge(high_code_groups[['username','SubmissionDate']], on=['username','SubmissionDate'], how='inner')
-    df_codes_collected = df_codes_collected[['Farmercode','username']].drop_duplicates()
-    df_codes_collected = df_codes_collected.assign(inconsistency="More than 12 codes collected in a day")
-else:
-    df_codes_collected = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
+# 7. (Removed the "More Than 12 Codes Collected" check)
 
 # 8. GPS Distance Check (if gps columns exist)
 if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
@@ -501,13 +490,10 @@ def check_id_risk(row):
     idnum = str(row['IDnumber']).strip() if pd.notnull(row['IDnumber']) else ""
     gender = str(row['Gender']).strip().lower() if pd.notnull(row['Gender']) else ""
     if idtype == "national_id":
-         # If IDnumber does not start with "CM" or "CF", high risk.
          if not (idnum.startswith("CM") or idnum.startswith("CF")):
               return "ID check high risk: For national_ID, IDnumber does not start with CM or CF"
-         # If it starts correctly but length is not exactly 14, then medium risk.
          if len(idnum) != 14:
               return "ID check medium risk: For national_ID, IDnumber length is not 14"
-         # Additionally, based on Gender:
          if gender == "male" and not idnum.startswith("CM"):
               return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
          if gender == "female" and not idnum.startswith("CF"):
@@ -527,7 +513,7 @@ df_id_incons = pd.DataFrame(id_incons_list)
 inconsistencies_df = pd.concat([
     df_time_incons, df_phone_incons, df_dup_phones, df_dup_codes,
     df_prod_high, df_prod_low, df_uganda_incons, df_overlap_incons,
-    df_codes_collected, df_gps_incons, df_id_incons
+    df_gps_incons, df_id_incons
 ], ignore_index=True)
 
 # ---------------------------
