@@ -574,5 +574,5 @@ def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-if st.button("Export Updated Form to Excel (Merged with Risk Columns)"):
+if st.button("Export Updated Form to Excel"):
     export_with_inconsistencies_merged(gdf, agg_incons)
