@@ -163,7 +163,6 @@ def plot_geometry(ax, geom, color, label, text_label):
 # ---------------------------
 def get_risk_rating(inc_text):
     txt = inc_text.lower()
-    # If message contains "high risk", return High
     if "high risk" in txt:
          return "High"
     if ("time < 30min" in txt or 
@@ -478,7 +477,9 @@ for code in df['Farmercode'].unique():
     else:
         text = None
     if text:
-        overlap_list.append({'Farmercode': code, 'username': "", 'inconsistency': text})
+        # Retrieve the username from the main data for this Farmercode
+        target_username = gdf.loc[gdf['Farmercode'] == code, 'username'].iloc[0]
+        overlap_list.append({'Farmercode': code, 'username': target_username, 'inconsistency': text})
 df_overlap_incons = pd.DataFrame(overlap_list)
 
 # 8. GPS Distance Check (if gps columns exist)
@@ -492,7 +493,7 @@ if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
     if gdf['gps_point'].notna().sum() > 0:
         gps_series = gpd.GeoSeries(gdf['gps_point'].dropna(), crs="EPSG:4326").to_crs('EPSG:2109')
         gdf.loc[gps_series.index, 'gps_point_proj'] = gps_series
-        gdf['gps_distance'] = gdf.apply(lambda row: row['gps_point_proj'].distance(row['geometry']) 
+        gdf['gps_distance'] = gdf.apply(lambda row: row['gps_point_proj'].distance(row['geometry'])
                                         if pd.notnull(row.get('gps_point_proj')) else None, axis=1)
         df_gps_incons = gdf.loc[gdf['gps_distance'] > 100, ['Farmercode','username']]
         df_gps_incons = pd.DataFrame(df_gps_incons).assign(inconsistency="GPS is more than 100m from polygon")
@@ -569,7 +570,7 @@ if not inconsistencies_df.empty:
     inconsistencies_df['Risk Rating'] = inconsistencies_df['inconsistency'].apply(get_risk_rating)
     agg_incons = inconsistencies_df.groupby(['Farmercode','username'], as_index=False).agg({
         'inconsistency': lambda x: ", ".join(x.unique()),
-        'Risk Rating': lambda x: max(x, key=lambda r: risk_order.get(r,0))
+        'Risk Rating': lambda x: max(x, key=lambda r: risk_order.get(r, 0))
     })
     agg_incons['Trust Responses'] = agg_incons['Risk Rating'].apply(lambda x: "No" if x=="High" else "Yes")
 else:
@@ -588,7 +589,7 @@ inspector_counts['HighRiskCodes'] = inspector_counts['HighRiskCodes'].astype(int
 # Sort inspectors by TotalCodes and take top 10
 top10 = inspector_counts.sort_values(by='TotalCodes', ascending=False).head(10)
 
-st.subheader("Suspicious Inspectors: High Risk Inspections  vs Total Inspections")
+st.subheader("Suspicious Inspectors: High Risk Inspections vs Total Inspections")
 if not top10.empty:
     fig, ax = plt.subplots(figsize=(10,6))
     x = range(len(top10))
@@ -656,7 +657,7 @@ if overlaps:
 # EXPORT (MERGED WITH AGGREGATED RISK COLUMNS & Computed Area)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
-    # Compute area in acres using conversion factor (1 m² = 0.000247105 acres)
+    # Compute area in acres (1 m² = 0.000247105 acres)
     export_gdf = main_gdf.copy()
     export_gdf['Acres'] = export_gdf['geometry'].area * 0.000247105
     # Convert geometry to WKT for export
