@@ -476,7 +476,6 @@ for code in df['Farmercode'].unique():
     else:
         text = None
     if text:
-        # Retrieve the username from the main data for this Farmercode
         target_username = gdf.loc[gdf['Farmercode'] == code, 'username'].iloc[0]
         overlap_list.append({'Farmercode': code, 'username': target_username, 'inconsistency': text})
 df_overlap_incons = pd.DataFrame(overlap_list)
@@ -524,17 +523,17 @@ else:
     agg_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency','Risk Rating','Trust Responses'])
 
 # ---------------------------
-# GRAPH: Unique Farmer Codes per Inconsistency
+# GRAPH: Individual Inconsistencies Count
 # ---------------------------
-# Group the aggregated inconsistencies by inconsistency text and count unique Farmercodes
-incons_counts = agg_incons.groupby('inconsistency')['Farmercode'].nunique().reset_index(name='Count')
-st.subheader("Unique Farmer Codes per Inconsistency")
-if not incons_counts.empty:
+# Instead of aggregating by unique farmer codes, we count every occurrence
+indiv_incons_counts = inconsistencies_df.groupby('inconsistency').size().reset_index(name='Count')
+st.subheader("Individual Inconsistency Occurrences")
+if not indiv_incons_counts.empty:
     fig2, ax2 = plt.subplots(figsize=(10,6))
-    ax2.bar(incons_counts['inconsistency'], incons_counts['Count'], color='orange')
+    ax2.bar(indiv_incons_counts['inconsistency'], indiv_incons_counts['Count'], color='orange')
     ax2.set_xlabel("Inconsistency Type")
-    ax2.set_ylabel("Unique Farmer Codes")
-    ax2.set_title("Unique Farmer Codes per Inconsistency")
+    ax2.set_ylabel("Number of Occurrences")
+    ax2.set_title("Count of Individual Inconsistency Occurrences")
     plt.setp(ax2.get_xticklabels(), rotation=45, ha='right')
     st.pyplot(fig2)
 else:
@@ -543,14 +542,11 @@ else:
 # ---------------------------
 # TOP 10 INSPECTORS BAR CHART
 # ---------------------------
-# Calculate total unique Farmercodes per inspector from main df
 total_per_inspector = df.groupby('username')['Farmercode'].nunique().reset_index(name='TotalCodes')
-# From aggregated inconsistencies, count unique Farmercodes with High risk per inspector
 high_risk_inspector = agg_incons[agg_incons['Risk Rating'] == "High"]
 high_per_inspector = high_risk_inspector.groupby('username')['Farmercode'].nunique().reset_index(name='HighRiskCodes')
 inspector_counts = total_per_inspector.merge(high_per_inspector, on='username', how='left').fillna(0)
 inspector_counts['HighRiskCodes'] = inspector_counts['HighRiskCodes'].astype(int)
-# Sort inspectors by TotalCodes and take top 10
 top10 = inspector_counts.sort_values(by='TotalCodes', ascending=False).head(10)
 
 st.subheader("Suspicious Inspectors: High Risk Inspections vs Total Inspections")
@@ -621,10 +617,8 @@ if overlaps:
 # EXPORT (MERGED WITH AGGREGATED RISK COLUMNS & Computed Area)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
-    # Compute area in acres (1 m² = 0.000247105 acres)
     export_gdf = main_gdf.copy()
     export_gdf['Acres'] = export_gdf['geometry'].area * 0.000247105
-    # Convert geometry to WKT for export
     export_gdf['geometry'] = export_gdf['geometry'].apply(lambda geom: geom.wkt)
     merged_df = export_gdf.merge(
         agg_incons_df[['Farmercode','username','inconsistency','Risk Rating','Trust Responses']],
