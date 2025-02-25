@@ -535,7 +535,7 @@ if not incons_counts.empty:
     ax2.set_xlabel("Inconsistency Type")
     ax2.set_ylabel("Unique Farmer Codes")
     ax2.set_title("Unique Farmer Codes per Inconsistency")
-    ax2.tick_params(axis='x', rotation=45, ha='right')
+    plt.setp(ax2.get_xticklabels(), rotation=45, ha='right')
     st.pyplot(fig2)
 else:
     st.write("No inconsistency data available.")
