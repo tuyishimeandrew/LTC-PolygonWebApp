@@ -178,23 +178,16 @@ def get_risk_rating(inc_text):
     return "Low"
 
 # ---------------------------
-# NEW: ID CHECK FUNCTION
+# UPDATED ID VERIFICATION FUNCTION
 # ---------------------------
 def check_id_risk(row):
     if pd.isnull(row.get('IDtype')):
          return None
     idtype = str(row['IDtype']).strip().lower()
     idnum = str(row['IDnumber']).strip() if pd.notnull(row['IDnumber']) else ""
-    gender = str(row['Gender']).strip().lower() if pd.notnull(row['Gender']) else ""
     if idtype == "national_id":
          if not (idnum.startswith("CM") or idnum.startswith("CF")):
-              return "ID check high risk: For national_ID, IDnumber does not start with CM or CF"
-         if len(idnum) != 14:
-              return "ID check medium risk: For national_ID, IDnumber length is not 14"
-         if gender == "male" and not idnum.startswith("CM"):
-              return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
-         if gender == "female" and not idnum.startswith("CF"):
-              return "ID check high risk: For national_ID with Female, IDnumber must start with CF"
+              return "ID check low risk: For national_ID, IDnumber does not start with CM or CF"
          return None
     else:
          return "ID check low risk: Non-national_ID provided"
@@ -207,7 +200,7 @@ for idx, row in df.iterrows():
 df_id_incons = pd.DataFrame(id_incons_list)
 
 # ---------------------------
-# NEW: Additional Chemical/Heavy Machinery Inconsistency Check
+# UPDATED: Additional Chemical/Heavy Machinery Inconsistency Check
 # ---------------------------
 cols_to_check = [
     'methodspestdiseasemanagement_using_chemicals',
@@ -236,9 +229,15 @@ else:
 # ---------------------------
 # INCONSISTENCY DETECTION (Vectorized)
 # ---------------------------
-# 1. Time Inconsistency (Threshold: 30 minutes = 1800 seconds)
-df_time_incons = df.loc[(df['duration'] < 1800) & (df['Registered'].str.lower()=='yes'), ['Farmercode','username']]
-df_time_incons = df_time_incons.assign(inconsistency="Time < 30min but Registered == Yes")
+# 1. Time Inconsistency: 
+#    - High risk if duration < 15 minutes (900 seconds)
+#    - Medium risk if duration >= 15 minutes but < 30 minutes (1800 seconds)
+df_time_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
+mask_high = (df['duration'] < 900) & (df['Registered'].str.lower()=='yes')
+mask_med = (df['duration'] >= 900) & (df['duration'] < 1800) & (df['Registered'].str.lower()=='yes')
+df_time_incons_high = df.loc[mask_high, ['Farmercode','username']].assign(inconsistency="High risk: Time < 15min but Registered == Yes")
+df_time_incons_med = df.loc[mask_med, ['Farmercode','username']].assign(inconsistency="Medium risk: Time < 30min but Registered == Yes")
+df_time_incons = pd.concat([df_time_incons_high, df_time_incons_med], ignore_index=True)
 
 # 2. Phone Mismatch
 df['Phone'] = pd.to_numeric(df['Phone'], errors='coerce').fillna(0).astype(int).astype(str)
@@ -252,18 +251,18 @@ df_dup_phones = df_dup_phones.assign(inconsistency="Duplicate phone entry")
 df_dup_codes = df[df.duplicated(subset=['Farmercode'], keep=False)][['Farmercode','username']]
 df_dup_codes = df_dup_codes.assign(inconsistency="Duplicate Farmer code")
 
-# 4. Productive Plants (flagged as high risk)
+# 4. Productive Plants
 if 'Productiveplants' in df.columns:
     gdf_plants = gdf.copy()
     gdf_plants['acres'] = gdf_plants.geometry.area * 0.000247105
     gdf_plants['expected_plants'] = gdf_plants['acres'] * 450
     gdf_plants['productiveplants'] = pd.to_numeric(gdf_plants['Productiveplants'], errors='coerce')
-    df_prod_high = gdf_plants[gdf_plants['productiveplants'] > gdf_plants['expected_plants']]
+    df_prod_high = gdf_plants[gdf_plants['productiveplants'] > gdf_plants['expected_plants'] * 1.25]
     df_prod_high = pd.DataFrame(df_prod_high[['Farmercode','username']])
-    df_prod_high = df_prod_high.assign(inconsistency="Productiveplants exceed expected per acre")
+    df_prod_high = df_prod_high.assign(inconsistency="High risk: Productiveplants exceed expected per acre by 25%")
     df_prod_low = gdf_plants[gdf_plants['productiveplants'] < (gdf_plants['expected_plants'] / 2)]
     df_prod_low = pd.DataFrame(df_prod_low[['Farmercode','username']])
-    df_prod_low = df_prod_low.assign(inconsistency="Productiveplants less than half expected per acre")
+    df_prod_low = df_prod_low.assign(inconsistency="High risk: Productiveplants less than half expected per acre")
 else:
     df_prod_high = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
     df_prod_low = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
@@ -501,58 +500,6 @@ if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
         df_gps_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 else:
     df_gps_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
-
-# NEW: ID Check with Corrected Logic
-def check_id_risk(row):
-    if pd.isnull(row.get('IDtype')):
-         return None
-    idtype = str(row['IDtype']).strip().lower()
-    idnum = str(row['IDnumber']).strip() if pd.notnull(row['IDnumber']) else ""
-    gender = str(row['Gender']).strip().lower() if pd.notnull(row['Gender']) else ""
-    if idtype == "national_id":
-         if not (idnum.startswith("CM") or idnum.startswith("CF")):
-              return "ID check high risk: For national_ID, IDnumber does not start with CM or CF"
-         if len(idnum) != 14:
-              return "ID check medium risk: For national_ID, IDnumber length is not 14"
-         if gender == "male" and not idnum.startswith("CM"):
-              return "ID check high risk: For national_ID with Male, IDnumber must start with CM"
-         if gender == "female" and not idnum.startswith("CF"):
-              return "ID check high risk: For national_ID with Female, IDnumber must start with CF"
-         return None
-    else:
-         return "ID check low risk: Non-national_ID provided"
-
-id_incons_list = []
-for idx, row in df.iterrows():
-    msg = check_id_risk(row)
-    if msg:
-         id_incons_list.append({'Farmercode': row['Farmercode'], 'username': row['username'], 'inconsistency': msg})
-df_id_incons = pd.DataFrame(id_incons_list)
-
-# NEW: Additional Chemical/Heavy Machinery Inconsistency Check
-cols_to_check = [
-    'methodspestdiseasemanagement_using_chemicals',
-    'agriculturalinputs_synthetic_chemicals_or_fertilize',
-    'fertilizerchemicals_Inorganic_fertilizer',
-    'fertilizerchemicals_Pesticides',
-    'fertilizerchemicals_Fungicides',
-    'fertilizerchemicals_Herbicides',
-    'childrenlabouractivities_spraying_of_chemicals',
-    'childrenlabouractivities_operating_of_heavy_machines'
-]
-if 'noncompliancesfound' in df.columns:
-    mask = df['noncompliancesfound'].str.lower() == "none_of_the_above"
-    df_chem_incons = df[mask].copy()
-    for col in cols_to_check:
-        if col in df_chem_incons.columns:
-            df_chem_incons[col] = pd.to_numeric(df_chem_incons[col], errors='coerce').fillna(0)
-        else:
-            df_chem_incons[col] = 0
-    condition = (df_chem_incons[cols_to_check] == 1).any(axis=1)
-    df_chem_incons = df_chem_incons[condition][['Farmercode','username']]
-    df_chem_incons = df_chem_incons.assign(inconsistency="High risk: noncompliancesfound is none_of_the_above but chemical/heavy machinery used")
-else:
-    df_chem_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 
 # Concatenate all inconsistencies (including overlaps)
 inconsistencies_df = pd.concat([
