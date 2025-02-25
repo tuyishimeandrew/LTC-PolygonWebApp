@@ -524,6 +524,23 @@ else:
     agg_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency','Risk Rating','Trust Responses'])
 
 # ---------------------------
+# GRAPH: Unique Farmer Codes per Inconsistency
+# ---------------------------
+# Group the aggregated inconsistencies by inconsistency text and count unique Farmercodes
+incons_counts = agg_incons.groupby('inconsistency')['Farmercode'].nunique().reset_index(name='Count')
+st.subheader("Unique Farmer Codes per Inconsistency")
+if not incons_counts.empty:
+    fig2, ax2 = plt.subplots(figsize=(10,6))
+    ax2.bar(incons_counts['inconsistency'], incons_counts['Count'], color='orange')
+    ax2.set_xlabel("Inconsistency Type")
+    ax2.set_ylabel("Unique Farmer Codes")
+    ax2.set_title("Unique Farmer Codes per Inconsistency")
+    ax2.tick_params(axis='x', rotation=45, ha='right')
+    st.pyplot(fig2)
+else:
+    st.write("No inconsistency data available.")
+
+# ---------------------------
 # TOP 10 INSPECTORS BAR CHART
 # ---------------------------
 # Calculate total unique Farmercodes per inspector from main df
