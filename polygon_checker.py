@@ -163,18 +163,22 @@ def plot_geometry(ax, geom, color, label, text_label):
 # ---------------------------
 def get_risk_rating(inc_text):
     txt = inc_text.lower()
-    if "high risk" in txt:
+    # New non-compliance mismatches are the only high risk
+    if "noncompliance-mismatch" in txt:
          return "High"
-    if ("time < 30min" in txt or 
-        "overlap > 10%" in txt or 
-        "more than 12 codes" in txt or 
-        "productiveplants" in txt):
-        return "High"
-    if ("overlap 5-10%" in txt or 
-        "gps is more than 100m" in txt):
-        return "Medium"
+    # Adjust other inconsistencies to medium (if they were originally high risk)
+    if "high risk:" in txt:
+         return "Medium"
+    if "medium risk:" in txt:
+         return "Medium"
+    if "overlap > 10%" in txt:
+         return "Medium"
+    if "overlap 5-10%" in txt:
+         return "Medium"
+    if "gps is more than 100m" in txt:
+         return "Medium"
     if any(kw in txt for kw in ["phone mismatch", "duplicate phone", "duplicate farmer"]):
-        return "Medium"
+         return "Medium"
     return "Low"
 
 # ---------------------------
@@ -200,38 +204,79 @@ for idx, row in df.iterrows():
 df_id_incons = pd.DataFrame(id_incons_list)
 
 # ---------------------------
-# UPDATED: Additional Chemical/Heavy Machinery Inconsistency Check
+# UPDATED: NEW NON-COMPLIANCE INCONSISTENCY CHECKS
+# These mismatches will be flagged as "Noncompliance-Mismatch" and considered high risk.
 # ---------------------------
-cols_to_check = [
-    'methodspestdiseasemanagement_using_chemicals',
-    'agriculturalinputs_synthetic_chemicals_or_fertilize',
-    'fertilizerchemicals_Inorganic_fertilizer',
-    'fertilizerchemicals_Pesticides',
-    'fertilizerchemicals_Fungicides',
-    'fertilizerchemicals_Herbicides',
-    'childrenlabouractivities_spraying_of_chemicals',
-    'childrenlabouractivities_operating_of_heavy_machines'
-]
-if 'noncompliancesfound' in df.columns:
-    mask = df['noncompliancesfound'].str.lower() == "none_of_the_above"
-    df_chem_incons = df[mask].copy()
-    for col in cols_to_check:
-        if col in df_chem_incons.columns:
-            df_chem_incons[col] = pd.to_numeric(df_chem_incons[col], errors='coerce').fillna(0)
-        else:
-            df_chem_incons[col] = 0
-    condition = (df_chem_incons[cols_to_check] == 1).any(axis=1)
-    df_chem_incons = df_chem_incons[condition][['Farmercode','username']]
-    df_chem_incons = df_chem_incons.assign(inconsistency="High risk: noncompliancesfound is none_of_the_above but chemical/heavy machinery used")
-else:
-    df_chem_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
+df_noncomp_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
+
+# Agro-chemical mismatch
+if set(['methodspestdiseasemanagement_using_chemicals','fertilizerchemicals_Pesticides',
+        'fertilizerchemicals_Fungicides','fertilizerchemicals_Herbicides','spraying_of_chemicals',
+        'typeworkvulnerable_Spraying_of_chemicals','agriculturalinputs_synthetic_chemicals_or_fertilize',
+        'noncompliancesfound_Agro_chemical']).issubset(df.columns):
+    chem_cols = ['methodspestdiseasemanagement_using_chemicals','fertilizerchemicals_Pesticides',
+                 'fertilizerchemicals_Fungicides','fertilizerchemicals_Herbicides','spraying_of_chemicals',
+                 'typeworkvulnerable_Spraying_of_chemicals','agriculturalinputs_synthetic_chemicals_or_fertilize']
+    for col in chem_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    df['noncompliancesfound_Agro_chemical'] = pd.to_numeric(df['noncompliancesfound_Agro_chemical'], errors='coerce').fillna(0)
+    cond_agro = (df[chem_cols].eq(1).any(axis=1)) & (df['noncompliancesfound_Agro_chemical'] == 0)
+    df_agro_noncom = df.loc[cond_agro, ['Farmercode','username']].copy()
+    df_agro_noncom['inconsistency'] = "Agro-chemical-Noncompliance-Mismatch"
+    df_noncomp_incons = pd.concat([df_noncomp_incons, df_agro_noncom], ignore_index=True)
+
+# Labour mismatch
+if set(['childrenworkingconditions','prisoners','contractsworkers','drinkingwaterworkers','noncompliancesfound_Labour']).issubset(df.columns):
+    cond_labour = (
+        (df['childrenworkingconditions'].str.lower() == 'any_time_when_needed') |
+        (df['prisoners'].str.lower() == 'yes') |
+        (df['contractsworkers'].str.lower() == 'no') |
+        (df['drinkingwaterworkers'].str.lower() == 'no')
+    ) & (df['noncompliancesfound_Labour'].astype(str) == '0')
+    df_labour_noncom = df.loc[cond_labour, ['Farmercode','username']].copy()
+    df_labour_noncom['inconsistency'] = "Labour-Noncompliance-Mismatch"
+    df_noncomp_incons = pd.concat([df_noncomp_incons, df_labour_noncom], ignore_index=True)
+
+# Environmental mismatch
+if set(['cutnativetrees','cutforests','toiletdischarge','separatewaste','noncompliancesfound_Environmental']).issubset(df.columns):
+    cond_env = (
+        (df['cutnativetrees'].str.lower() == 'yes') |
+        (df['cutforests'].str.lower() == 'yes') |
+        (df['toiletdischarge'].str.lower() == 'yes') |
+        (df['separatewaste'].str.lower() == 'no')
+    ) & (df['noncompliancesfound_Environmental'].astype(str) == '0')
+    df_env_noncom = df.loc[cond_env, ['Farmercode','username']].copy()
+    df_env_noncom['inconsistency'] = "Environmental-Noncompliance-Mismatch"
+    df_noncomp_incons = pd.concat([df_noncomp_incons, df_env_noncom], ignore_index=True)
+
+# Agronomic mismatch
+if set(['pruning','desuckering','manageweeds','knowledgeIPM','noncompliancesfound_Agronomic']).issubset(df.columns):
+    cond_agronomic = (
+        (df['pruning'].str.lower() == 'no') |
+        (df['desuckering'].str.lower() == 'no') |
+        (df['manageweeds'].str.lower() == 'no') |
+        (df['knowledgeIPM'].str.lower() == 'no')
+    ) & (df['noncompliancesfound_Agronomic'].astype(str) == '0')
+    df_agronomic_noncom = df.loc[cond_agronomic, ['Farmercode','username']].copy()
+    df_agronomic_noncom['inconsistency'] = "Agronomic-Noncompliance-Mismatch"
+    df_noncomp_incons = pd.concat([df_noncomp_incons, df_agronomic_noncom], ignore_index=True)
+
+# PostHarvest mismatch
+if set(['ripepods','storedrycocoa','separatebasins','noncompliancesfound_Harvest_and_postharvestt']).issubset(df.columns):
+    cond_postharvest = (
+        (df['ripepods'].str.lower() == 'no') |
+        (df['storedrycocoa'].str.lower() == 'no') |
+        (df['separatebasins'].str.lower() == 'no')
+    ) & (df['noncompliancesfound_Harvest_and_postharvestt'].astype(str) == '0')
+    df_postharvest_noncom = df.loc[cond_postharvest, ['Farmercode','username']].copy()
+    df_postharvest_noncom['inconsistency'] = "PostHarvest-Noncompliance-Mismatch"
+    df_noncomp_incons = pd.concat([df_noncomp_incons, df_postharvest_noncom], ignore_index=True)
 
 # ---------------------------
 # INCONSISTENCY DETECTION (Vectorized)
 # ---------------------------
 # 1. Time Inconsistency: 
-#    - High risk if duration < 15 minutes (900 seconds)
-#    - Medium risk if duration >= 15 minutes but < 30 minutes (1800 seconds)
+#    - Adjusted: All time inconsistencies (even if originally high risk) are now medium risk.
 df_time_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 mask_high = (df['duration'] < 900) & (df['Registered'].str.lower()=='yes')
 mask_med = (df['duration'] >= 900) & (df['duration'] < 1800) & (df['Registered'].str.lower()=='yes')
@@ -500,11 +545,11 @@ if 'gps-Latitude' in df.columns and 'gps-Longitude' in df.columns:
 else:
     df_gps_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency'])
 
-# Concatenate all inconsistencies (including overlaps)
+# Concatenate all inconsistencies (including overlaps and non-compliance mismatches)
 inconsistencies_df = pd.concat([
     df_time_incons, df_phone_incons, df_dup_phones, df_dup_codes,
     df_prod_high, df_prod_low, df_uganda_incons, df_overlap_incons,
-    df_gps_incons, df_id_incons, df_chem_incons
+    df_gps_incons, df_id_incons, df_noncomp_incons
 ], ignore_index=True)
 
 # ---------------------------
@@ -523,9 +568,8 @@ else:
     agg_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency','Risk Rating','Trust Responses'])
 
 # ---------------------------
-# GRAPH: Individual Inconsistencies Count
+# GRAPH: Individual Inconsistency Occurrences
 # ---------------------------
-# Instead of aggregating by unique farmer codes, we count every occurrence
 indiv_incons_counts = inconsistencies_df.groupby('inconsistency').size().reset_index(name='Count')
 st.subheader("Individual Inconsistency Occurrences")
 if not indiv_incons_counts.empty:
