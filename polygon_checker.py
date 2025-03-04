@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 import io
+from datetime import datetime
 
 st.title("Latitude Inspections Inconsistency Checker")
 
@@ -72,6 +73,20 @@ else:
             cond = df[new_col].notna() & (df['redo_selectplot'] == plot_val)
             df.loc[cond, new_col] = df.loc[cond, 'redo_polygonplot']
     df = df.drop(columns=['redo_selectplot', 'redo_polygonplot'])
+
+# ---------------------------
+# DATE SLIDER FILTER
+# ---------------------------
+# Check if SubmissionDate exists in main file
+if "SubmissionDate" in df.columns:
+    df["SubmissionDate"] = pd.to_datetime(df["SubmissionDate"], errors='coerce')
+    min_date = df["SubmissionDate"].min().date()
+    max_date = df["SubmissionDate"].max().date()
+    start_date, end_date = st.slider("Select Submission Date Range", min_value=min_date, max_value=max_date, value=(min_date, max_date))
+    # Filter the main dataframe by the selected date range
+    df = df[(df["SubmissionDate"].dt.date >= start_date) & (df["SubmissionDate"].dt.date <= end_date)]
+else:
+    st.warning("SubmissionDate column not found in the main file. Date filter will be skipped.")
 
 # ---------------------------
 # POLYGON HANDLING FUNCTIONS
@@ -568,42 +583,52 @@ else:
     agg_incons = pd.DataFrame(columns=['Farmercode','username','inconsistency','Risk Rating','Trust Responses'])
 
 # ---------------------------
-# GRAPH: Individual Inconsistency Occurrences
+# GRAPH: Individual Inconsistency Occurrences (High Risk Non-compliance Mismatches Only)
 # ---------------------------
+# Filter for the five non-compliance mismatch types (high risk)
+noncomp_types = ["agro-chemical-noncompliance-mismatch", "labour-noncompliance-mismatch",
+                 "environmental-noncompliance-mismatch", "agronomic-noncompliance-mismatch",
+                 "postharvest-noncompliance-mismatch"]
+incons_high = inconsistencies_df[inconsistencies_df['inconsistency'].str.lower().isin(noncomp_types)]
 indiv_incons_counts = inconsistencies_df.groupby('inconsistency').size().reset_index(name='Count')
-st.subheader("Individual Inconsistency Occurrences")
+# Use only high risk non-compliance mismatches for the chart
+indiv_incons_counts = indiv_incons_counts[indiv_incons_counts['inconsistency'].str.lower().isin(noncomp_types)]
+st.subheader("High Risk Non-compliance Mismatch Occurrences")
 if not indiv_incons_counts.empty:
     fig2, ax2 = plt.subplots(figsize=(10,6))
     ax2.bar(indiv_incons_counts['inconsistency'], indiv_incons_counts['Count'], color='orange')
-    ax2.set_xlabel("Inconsistency Type")
+    ax2.set_xlabel("Non-compliance Mismatch Type")
     ax2.set_ylabel("Number of Occurrences")
-    ax2.set_title("Count of Individual Inconsistency Occurrences")
+    ax2.set_title("Occurrences of High Risk Non-compliance Mismatches")
     plt.setp(ax2.get_xticklabels(), rotation=45, ha='right')
     st.pyplot(fig2)
 else:
-    st.write("No inconsistency data available.")
+    st.write("No high risk non-compliance mismatches data available.")
 
 # ---------------------------
-# TOP 10 INSPECTORS BAR CHART
+# TOP 10 INSPECTORS BAR CHART (Based on High Risk Counts)
 # ---------------------------
-total_per_inspector = df.groupby('username')['Farmercode'].nunique().reset_index(name='TotalCodes')
+# Total inspections per inspector (from the filtered df)
+total_per_inspector = df.groupby('username')['Farmercode'].nunique().reset_index(name='TotalInspections')
+# High risk inspections from aggregated inconsistencies (High only)
 high_risk_inspector = agg_incons[agg_incons['Risk Rating'] == "High"]
-high_per_inspector = high_risk_inspector.groupby('username')['Farmercode'].nunique().reset_index(name='HighRiskCodes')
+high_per_inspector = high_risk_inspector.groupby('username')['Farmercode'].nunique().reset_index(name='HighRiskInspections')
 inspector_counts = total_per_inspector.merge(high_per_inspector, on='username', how='left').fillna(0)
-inspector_counts['HighRiskCodes'] = inspector_counts['HighRiskCodes'].astype(int)
-top10 = inspector_counts.sort_values(by='TotalCodes', ascending=False).head(10)
+inspector_counts['HighRiskInspections'] = inspector_counts['HighRiskInspections'].astype(int)
+# Get top 10 inspectors with the most high risk inspections
+top10 = inspector_counts.sort_values(by='HighRiskInspections', ascending=False).head(10)
 
-st.subheader("Suspicious Inspectors: High Risk Inspections vs Total Inspections")
+st.subheader("Top 10 Inspectors: High Risk Inspections vs Total Inspections")
 if not top10.empty:
     fig, ax = plt.subplots(figsize=(10,6))
     x = range(len(top10))
     width = 0.35
-    ax.bar(x, top10['TotalCodes'], width, label='Total Unique Codes', color='lightblue')
-    ax.bar([p + width for p in x], top10['HighRiskCodes'], width, label='High Risk Codes', color='red')
+    ax.bar(x, top10['TotalInspections'], width, label='Total Inspections', color='lightblue')
+    ax.bar([p + width for p in x], top10['HighRiskInspections'], width, label='High Risk Inspections', color='red')
     ax.set_xticks([p + width/2 for p in x])
     ax.set_xticklabels(top10['username'], rotation=45, ha='right')
-    ax.set_ylabel("Number of Inspections")
-    ax.set_title("Unique High Risk vs Total Codes per Inspector")
+    ax.set_ylabel("Inspection Count")
+    ax.set_title("Top 10 Inspectors by High Risk Inspections")
     ax.legend()
     st.pyplot(fig)
 else:
@@ -659,6 +684,7 @@ if overlaps:
 
 # ---------------------------
 # EXPORT (MERGED WITH AGGREGATED RISK COLUMNS & Computed Area)
+# Only export records within the selected date range.
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     export_gdf = main_gdf.copy()
