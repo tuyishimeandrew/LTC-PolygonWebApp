@@ -76,7 +76,7 @@ else:
 # ---------------------------
 # DATE SLIDER FILTERING
 # ---------------------------
-# Use "Submissiondate" if available; otherwise check "SubmissionDate"
+# Use "Submissiondate" if available; otherwise "SubmissionDate"
 if 'Submissiondate' in df.columns:
     df['Submissiondate'] = pd.to_datetime(df['Submissiondate'], errors='coerce')
 elif 'SubmissionDate' in df.columns:
@@ -105,7 +105,7 @@ def parse_polygon_z(polygon_str):
     return Polygon(vertices) if len(vertices) >= 3 else None
 
 def combine_polygons(row):
-    # Combine all available polygon columns for mapping purposes
+    # Combine available polygon columns for mapping purposes
     polys = [parse_polygon_z(row[col]) for col in ['polygonplot', 'polygonplotnew_1',
                                                     'polygonplotnew_2', 'polygonplotnew_3',
                                                     'polygonplotnew_4'] if col in row and pd.notna(row[col])]
@@ -118,12 +118,12 @@ def combine_polygons(row):
                 valid_polys.append(p)
     if not valid_polys:
         return None
-    return valid_polys[0] if len(valid_polys)==1 else unary_union(valid_polys)
+    return valid_polys[0] if len(valid_polys) == 1 else unary_union(valid_polys)
 
 df['geometry'] = df.apply(combine_polygons, axis=1)
 df = df[df['geometry'].notna()]
 
-# Create a GeoDataFrame and project to EPSG:2109 (Uganda projection)
+# Create a GeoDataFrame and project to Uganda's CRS (EPSG:2109)
 gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
 gdf = gdf.to_crs('EPSG:2109')
 gdf['geometry'] = gdf['geometry'].buffer(0)
@@ -182,10 +182,10 @@ def plot_geometry(ax, geom, color, label, text_label):
 # (a) Noncompliance mismatch checks
 def check_labour_mismatch(row):
     cond = (
-        (str(row.get('childrenworkingconditions','')).strip().lower() == "any_time_when_needed") or
-        (str(row.get('prisoners','')).strip().lower() == "yes") or
-        (str(row.get('contractsworkers','')).strip().lower() == "no") or
-        (str(row.get('drinkingwaterworkers','')).strip().lower() == "no")
+        (str(row.get('childrenworkingconditions', '')).strip().lower() == "any_time_when_needed") or
+        (str(row.get('prisoners', '')).strip().lower() == "yes") or
+        (str(row.get('contractsworkers', '')).strip().lower() == "no") or
+        (str(row.get('drinkingwaterworkers', '')).strip().lower() == "no")
     )
     try:
         found = float(row.get("noncompliancesfound_Labour", 0))
@@ -197,10 +197,10 @@ def check_labour_mismatch(row):
 
 def check_environmental_mismatch(row):
     cond = (
-        (str(row.get('cutnativetrees','')).strip().lower() == "yes") or
-        (str(row.get('cutforests','')).strip().lower() == "yes") or
-        (str(row.get('toiletdischarge','')).strip().lower() == "yes") or
-        (str(row.get('separatewaste','')).strip().lower() == "no")
+        (str(row.get('cutnativetrees', '')).strip().lower() == "yes") or
+        (str(row.get('cutforests', '')).strip().lower() == "yes") or
+        (str(row.get('toiletdischarge', '')).strip().lower() == "yes") or
+        (str(row.get('separatewaste', '')).strip().lower() == "no")
     )
     try:
         found = float(row.get("noncompliancesfound_Environmental", 0))
@@ -212,10 +212,10 @@ def check_environmental_mismatch(row):
 
 def check_agronomic_mismatch(row):
     cond = (
-        (str(row.get('pruning','')).strip().lower() == "no") or
-        (str(row.get('desuckering','')).strip().lower() == "no") or
-        (str(row.get('manageweeds','')).strip().lower() == "no") or
-        (str(row.get('knowledgeIPM','')).strip().lower() == "no")
+        (str(row.get('pruning', '')).strip().lower() == "no") or
+        (str(row.get('desuckering', '')).strip().lower() == "no") or
+        (str(row.get('manageweeds', '')).strip().lower() == "no") or
+        (str(row.get('knowledgeIPM', '')).strip().lower() == "no")
     )
     try:
         found = float(row.get("noncompliancesfound_Agronomic", 0))
@@ -227,9 +227,9 @@ def check_agronomic_mismatch(row):
 
 def check_postharvest_mismatch(row):
     cond = (
-        (str(row.get('ripepods','')).strip().lower() == "no") or
-        (str(row.get('storedrycocoa','')).strip().lower() == "no") or
-        (str(row.get('separatebasins','')).strip().lower() == "no")
+        (str(row.get('ripepods', '')).strip().lower() == "no") or
+        (str(row.get('storedrycocoa', '')).strip().lower() == "no") or
+        (str(row.get('separatebasins', '')).strip().lower() == "no")
     )
     try:
         found = float(row.get("noncompliancesfound_Harvest_and_postharvestt", 0))
@@ -239,7 +239,7 @@ def check_postharvest_mismatch(row):
         return "PostHarvest-Noncompliance-Mismatch"
     return None
 
-# (b) Phone mismatch check – now using the 'phone_match' column
+# (b) Phone mismatch check – using the 'phone_match' column
 def check_phone_mismatch(row):
     pm = str(row.get('phone_match', "")).strip().lower()
     if pm != "match":
@@ -248,7 +248,8 @@ def check_phone_mismatch(row):
 
 # (c) Productive plants expected check
 def compute_total_area(row):
-    # Sum areas from these polygon columns: 'polygonplot','polygonplotnew_2','polygonplotnew_3','polygonplotnew_4'
+    # Sum areas from these polygon columns.
+    # Ensure that the polygon is reprojected to Uganda's CRS (EPSG:2109) before area calculation.
     polygon_cols = ['polygonplot', 'polygonplotnew_2', 'polygonplotnew_3', 'polygonplotnew_4']
     total_area = 0
     for col in polygon_cols:
@@ -260,8 +261,8 @@ def compute_total_area(row):
             poly = val
         if poly and poly.is_valid:
             try:
-                gseries = gpd.GeoSeries([poly], crs="EPSG:4326")
-                gseries = gseries.to_crs("EPSG:2109")
+                # Create a GeoSeries, assign original CRS EPSG:4326 then reproject to EPSG:2109
+                gseries = gpd.GeoSeries([poly], crs="EPSG:4326").to_crs("EPSG:2109")
                 total_area += gseries.iloc[0].area
             except Exception as e:
                 pass
@@ -279,11 +280,11 @@ def compute_total_plants(row):
     return total
 
 def check_productive_plants(row):
-    total_area = compute_total_area(row)  # in m²
-    acres = total_area * 0.000247105
-    expected = acres * 450
+    total_area = compute_total_area(row)  # in m², computed in Uganda's CRS (EPSG:2109)
+    acres = total_area * 0.000247105  # conversion factor from m² to acres
+    expected = acres * 450  # expected number of plants per acre
     total_plants = compute_total_plants(row)
-    # Uncomment the line below to debug values:
+    # Uncomment the line below for debugging if needed:
     # st.write(f"Farmer {row['Farmercode']}: Area: {total_area:.2f} m², Acres: {acres:.2f}, Expected: {expected:.2f}, Actual: {total_plants}")
     if expected > 0:
         if total_plants > expected * 1.25 or total_plants < expected * 0.5:
@@ -472,14 +473,14 @@ def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     # Compute individual inconsistency Boolean flags for each row
     flags = export_df.apply(lambda row: pd.Series(get_inconsistency_flags(row)), axis=1)
     export_df = pd.concat([export_df, flags], axis=1)
-    # Compute area in acres using proper GeoSeries conversion
+    # Compute area in acres using proper GeoSeries conversion (using Uganda's CRS EPSG:2109)
     export_df['Acres'] = gpd.GeoSeries(export_df['geometry'], crs=gdf.crs).area * 0.000247105
     # Convert geometry to WKT for export
     export_df['geometry'] = export_df['geometry'].apply(lambda geom: geom.wkt)
     # Merge with aggregated risk and overall inconsistency messages
     merged_df = export_df.merge(
-        agg_incons_df[['Farmercode','username','inconsistency','Risk Rating','Trust Responses']],
-        on=['Farmercode','username'], how='left'
+        agg_incons_df[['Farmercode', 'username', 'inconsistency', 'Risk Rating', 'Trust Responses']],
+        on=['Farmercode', 'username'], how='left'
     )
     merged_df['inconsistency'] = merged_df['inconsistency'].fillna("No Inconsistency")
     merged_df['Risk Rating'] = merged_df['Risk Rating'].fillna("None")
