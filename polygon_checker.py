@@ -177,7 +177,7 @@ def plot_geometry(ax, geom, color, label, text_label):
                 ax.text(cx, cy, f"{text_label:.1f}%", fontsize=10, color='white', ha='center', va='center')
 
 # ---------------------------
-# ADDITIONAL HELPER FUNCTIONS FOR INCONSISTENCY CHECKS
+# HELPER FUNCTIONS FOR INCONSISTENCY CHECKS
 # ---------------------------
 # (a) Noncompliance mismatch checks
 def check_labour_mismatch(row):
@@ -278,8 +278,8 @@ def check_productive_plants(row):
     acres = total_area * 0.000247105
     expected = acres * 450
     total_plants = compute_total_plants(row)
-    # Debug prints (remove if not needed)
-    # st.write(f"Farmer {row['Farmercode']} -> Area: {total_area:.2f} m², Acres: {acres:.2f}, Expected: {expected:.2f}, Actual Plants: {total_plants}")
+    # Debug print (comment out in production)
+    # st.write(f"Farmer {row['Farmercode']} -> Area: {total_area:.2f} m², Acres: {acres:.2f}, Expected: {expected:.2f}, Actual: {total_plants}")
     if expected > 0:
         if total_plants > expected * 1.25 or total_plants < expected * 0.5:
             return "Total productive plants expected inconsistency"
@@ -296,9 +296,8 @@ def check_time_inconsistency(row):
     return None
 
 # ---------------------------
-# INCONSISTENCY DETECTION (Row-wise)
+# RECORD BOOLEAN FLAGS FOR EACH INCONSISTENCY
 # ---------------------------
-# We also want to record Boolean flags for each inconsistency
 def get_inconsistency_flags(row):
     flags = {}
     flags['Labour_Noncompliance'] = True if check_labour_mismatch(row) else False
@@ -308,17 +307,18 @@ def get_inconsistency_flags(row):
     flags['Phone_Mismatch'] = True if check_phone_mismatch(row) else False
     flags['Productive_Plants_Inconsistency'] = True if check_productive_plants(row) else False
     flags['Time_Inconsistency'] = True if check_time_inconsistency(row) else False
-    # Overlap flag: compute overlaps for this farmer code
+    # Overlap flag: check overlaps for this farmer
     overlaps, overall_pct = check_overlaps(gdf, row['Farmercode'])
     flags['Overlap_Inconsistency'] = True if overall_pct >= 5 else False
     return flags
 
-# Collect a list of detected inconsistencies for aggregation
+# ---------------------------
+# INCONSISTENCY DETECTION (Row-wise Aggregation)
+# ---------------------------
 inconsistencies_list = []
 for idx, row in df.iterrows():
     farmer = row['Farmercode']
     user = row.get('username', '')
-    
     for check_fn in [check_labour_mismatch, check_environmental_mismatch,
                      check_agronomic_mismatch, check_postharvest_mismatch,
                      check_phone_mismatch, check_productive_plants, check_time_inconsistency]:
@@ -340,7 +340,6 @@ for code in df['Farmercode'].unique():
         target_username = df.loc[df['Farmercode'] == code, 'username'].iloc[0]
         overlap_incons_list.append({'Farmercode': code, 'username': target_username, 'inconsistency': text})
         
-# Combine all inconsistency messages for aggregation
 inconsistencies_df = pd.DataFrame(inconsistencies_list + overlap_incons_list)
 
 # ---------------------------
@@ -465,14 +464,14 @@ if overlaps:
 # EXPORT (Merged with Aggregated Risk and Individual Inconsistency Flags)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
-    # Create a copy to add Boolean columns for each inconsistency
+    # Create a copy for export
     export_df = df.copy()
     # Compute individual inconsistency flags for each row
-    flag_cols = get_inconsistency_flags
     flags = export_df.apply(lambda row: pd.Series(get_inconsistency_flags(row)), axis=1)
     export_df = pd.concat([export_df, flags], axis=1)
-    # Compute area in acres for export
-    export_df['Acres'] = export_df['geometry'].area * 0.000247105
+    # Compute area in acres using a proper GeoSeries conversion
+    export_df['Acres'] = gpd.GeoSeries(export_df['geometry'], crs=gdf.crs).area * 0.000247105
+    # Convert geometry to WKT string for export
     export_df['geometry'] = export_df['geometry'].apply(lambda geom: geom.wkt)
     # Merge with aggregated risk and overall inconsistency messages
     merged_df = export_df.merge(
