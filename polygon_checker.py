@@ -74,6 +74,26 @@ else:
     df = df.drop(columns=['redo_selectplot', 'redo_polygonplot'])
 
 # ---------------------------
+# DATE SLIDER FILTERING
+# ---------------------------
+# Use "Submissiondate" if available; otherwise check "SubmissionDate"
+if 'Submissiondate' in df.columns:
+    df['Submissiondate'] = pd.to_datetime(df['Submissiondate'], errors='coerce')
+elif 'SubmissionDate' in df.columns:
+    df['Submissiondate'] = pd.to_datetime(df['SubmissionDate'], errors='coerce')
+else:
+    df['Submissiondate'] = pd.NaT
+
+if df['Submissiondate'].notna().sum() > 0:
+    min_date = df['Submissiondate'].min().date()
+    max_date = df['Submissiondate'].max().date()
+    selected_date_range = st.slider("Select Submission Date Range", min_date, max_date, (min_date, max_date))
+    df = df[(df['Submissiondate'].dt.date >= selected_date_range[0]) & 
+            (df['Submissiondate'].dt.date <= selected_date_range[1])]
+else:
+    st.warning("Submission date not available. Proceeding without date filtering.")
+
+# ---------------------------
 # POLYGON HANDLING FUNCTIONS
 # ---------------------------
 def parse_polygon_z(polygon_str):
@@ -157,7 +177,7 @@ def plot_geometry(ax, geom, color, label, text_label):
                 ax.text(cx, cy, f"{text_label:.1f}%", fontsize=10, color='white', ha='center', va='center')
 
 # ---------------------------
-# ADDITIONAL HELPER FUNCTIONS FOR NEW INCONSISTENCY CHECKS
+# ADDITIONAL HELPER FUNCTIONS FOR INCONSISTENCY CHECKS
 # ---------------------------
 # (a) Noncompliance mismatch checks
 def check_labour_mismatch(row):
@@ -219,7 +239,7 @@ def check_postharvest_mismatch(row):
         return "PostHarvest-Noncompliance-Mismatch"
     return None
 
-# (b) Phone mismatch check (register as medium risk)
+# (b) Phone mismatch check (Medium risk)
 def check_phone_mismatch(row):
     phone = str(row.get('Phone', "")).strip()
     phone_hidden = str(row.get('Phone_hidden', "")).strip()
@@ -227,9 +247,9 @@ def check_phone_mismatch(row):
         return "Phone number mismatch"
     return None
 
-# (c) Productive plants expected check:
-# For area, sum the areas of polygons from columns: 'polygonplot', 'polygonplotnew_2', 'polygonplotnew_3', 'polygonplotnew_4'
+# (c) Productive plants expected check
 def compute_total_area(row):
+    # Sum areas from these polygon columns: 'polygonplot','polygonplotnew_2','polygonplotnew_3','polygonplotnew_4'
     polygon_cols = ['polygonplot', 'polygonplotnew_2', 'polygonplotnew_3', 'polygonplotnew_4']
     total_area = 0
     for col in polygon_cols:
@@ -237,14 +257,13 @@ def compute_total_area(row):
         if pd.notna(poly_str):
             poly = parse_polygon_z(poly_str)
             if poly and poly.is_valid:
-                # create a GeoSeries with original CRS and then project to EPSG:2109
                 gseries = gpd.GeoSeries([poly], crs="EPSG:4326")
                 gseries = gseries.to_crs("EPSG:2109")
                 total_area += gseries.iloc[0].area
     return total_area
 
-# Sum productive plants from all relevant columns
 def compute_total_plants(row):
+    # Sum productive plants from these columns
     plant_cols = ['Productiveplants', 'Productiveplantsnew_1', 'Productiveplantsnew_2', 'Productiveplantsnew_3', 'Productiveplantsnew_4']
     total = 0
     for col in plant_cols:
@@ -259,42 +278,55 @@ def check_productive_plants(row):
     acres = total_area * 0.000247105
     expected = acres * 450
     total_plants = compute_total_plants(row)
-    # Check if total_plants is more than 125% of expected or less than 50% of expected
+    # Debug prints (remove if not needed)
+    # st.write(f"Farmer {row['Farmercode']} -> Area: {total_area:.2f} m², Acres: {acres:.2f}, Expected: {expected:.2f}, Actual Plants: {total_plants}")
     if expected > 0:
         if total_plants > expected * 1.25 or total_plants < expected * 0.5:
             return "Total productive plants expected inconsistency"
     return None
 
-# ---------------------------
-# INCONSISTENCY DETECTION (Only the expected ones)
-# ---------------------------
-inconsistencies_list = []
+# (d) Time inconsistency check (High risk: duration < 15 mins)
+def check_time_inconsistency(row):
+    try:
+        duration = float(row.get('duration', 0))
+    except:
+        duration = None
+    if duration is not None and duration < 900:
+        return "Time inconsistency: Inspection completed in less than 15 mins"
+    return None
 
-# Loop through each record (row) in df
+# ---------------------------
+# INCONSISTENCY DETECTION (Row-wise)
+# ---------------------------
+# We also want to record Boolean flags for each inconsistency
+def get_inconsistency_flags(row):
+    flags = {}
+    flags['Labour_Noncompliance'] = True if check_labour_mismatch(row) else False
+    flags['Environmental_Noncompliance'] = True if check_environmental_mismatch(row) else False
+    flags['Agronomic_Noncompliance'] = True if check_agronomic_mismatch(row) else False
+    flags['PostHarvest_Noncompliance'] = True if check_postharvest_mismatch(row) else False
+    flags['Phone_Mismatch'] = True if check_phone_mismatch(row) else False
+    flags['Productive_Plants_Inconsistency'] = True if check_productive_plants(row) else False
+    flags['Time_Inconsistency'] = True if check_time_inconsistency(row) else False
+    # Overlap flag: compute overlaps for this farmer code
+    overlaps, overall_pct = check_overlaps(gdf, row['Farmercode'])
+    flags['Overlap_Inconsistency'] = True if overall_pct >= 5 else False
+    return flags
+
+# Collect a list of detected inconsistencies for aggregation
+inconsistencies_list = []
 for idx, row in df.iterrows():
     farmer = row['Farmercode']
     user = row.get('username', '')
     
-    # 1. Noncompliance mismatches (High risk)
-    labour = check_labour_mismatch(row)
-    environmental = check_environmental_mismatch(row)
-    agronomic = check_agronomic_mismatch(row)
-    postharvest = check_postharvest_mismatch(row)
-    for msg in [labour, environmental, agronomic, postharvest]:
+    for check_fn in [check_labour_mismatch, check_environmental_mismatch,
+                     check_agronomic_mismatch, check_postharvest_mismatch,
+                     check_phone_mismatch, check_productive_plants, check_time_inconsistency]:
+        msg = check_fn(row)
         if msg:
             inconsistencies_list.append({'Farmercode': farmer, 'username': user, 'inconsistency': msg})
-    
-    # 2. Phone mismatch (Medium risk)
-    phone_mismatch = check_phone_mismatch(row)
-    if phone_mismatch:
-        inconsistencies_list.append({'Farmercode': farmer, 'username': user, 'inconsistency': phone_mismatch})
-    
-    # 3. Productive plants expected check (High risk)
-    prod_check = check_productive_plants(row)
-    if prod_check:
-        inconsistencies_list.append({'Farmercode': farmer, 'username': user, 'inconsistency': prod_check})
-
-# 4. Overlap check (using updated thresholds)
+            
+# Overlap check (aggregated per farmer)
 overlap_incons_list = []
 for code in df['Farmercode'].unique():
     overlaps, overall_pct = check_overlaps(gdf, code)
@@ -307,18 +339,19 @@ for code in df['Farmercode'].unique():
     if text:
         target_username = df.loc[df['Farmercode'] == code, 'username'].iloc[0]
         overlap_incons_list.append({'Farmercode': code, 'username': target_username, 'inconsistency': text})
-
-# Combine all inconsistencies
+        
+# Combine all inconsistency messages for aggregation
 inconsistencies_df = pd.DataFrame(inconsistencies_list + overlap_incons_list)
 
 # ---------------------------
 # AGGREGATE INCONSISTENCIES PER RECORD
 # ---------------------------
 risk_order = {"High": 3, "Medium": 2, "Low": 1, "None": 0}
-# For our purposes, assign risk levels manually:
 def get_risk_rating(inc_text):
     inc_text_lower = inc_text.lower()
-    if "noncompliance-mismatch" in inc_text_lower or "total productive plants" in inc_text_lower:
+    if ("noncompliance-mismatch" in inc_text_lower or 
+        "total productive plants" in inc_text_lower or 
+        "time inconsistency" in inc_text_lower):
          return "High"
     if "overlap >" in inc_text_lower:
          return "Medium"
@@ -429,13 +462,20 @@ if overlaps:
     st.pyplot(fig)
 
 # ---------------------------
-# EXPORT (MERGED WITH AGGREGATED RISK COLUMNS & Computed Area)
+# EXPORT (Merged with Aggregated Risk and Individual Inconsistency Flags)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
-    export_gdf = main_gdf.copy()
-    export_gdf['Acres'] = export_gdf['geometry'].area * 0.000247105
-    export_gdf['geometry'] = export_gdf['geometry'].apply(lambda geom: geom.wkt)
-    merged_df = export_gdf.merge(
+    # Create a copy to add Boolean columns for each inconsistency
+    export_df = df.copy()
+    # Compute individual inconsistency flags for each row
+    flag_cols = get_inconsistency_flags
+    flags = export_df.apply(lambda row: pd.Series(get_inconsistency_flags(row)), axis=1)
+    export_df = pd.concat([export_df, flags], axis=1)
+    # Compute area in acres for export
+    export_df['Acres'] = export_df['geometry'].area * 0.000247105
+    export_df['geometry'] = export_df['geometry'].apply(lambda geom: geom.wkt)
+    # Merge with aggregated risk and overall inconsistency messages
+    merged_df = export_df.merge(
         agg_incons_df[['Farmercode','username','inconsistency','Risk Rating','Trust Responses']],
         on=['Farmercode','username'], how='left'
     )
@@ -447,7 +487,7 @@ def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
         merged_df.to_excel(writer, index=False, sheet_name="Updated Form")
     towrite.seek(0)
     st.download_button(
-        label="Download Updated Form with Risk Columns",
+        label="Download Updated Form with Inconsistency Columns",
         data=towrite,
         file_name="updated_inspection_form_merged.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
