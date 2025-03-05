@@ -130,7 +130,7 @@ gdf['geometry'] = gdf['geometry'].buffer(0)
 gdf = gdf[gdf.is_valid]
 
 # ---------------------------
-# SPATIAL INDEXED OVERLAP CHECK (kept as before)
+# SPATIAL INDEXED OVERLAP CHECK
 # ---------------------------
 def check_overlaps(gdf, target_code):
     target_row = gdf[gdf['Farmercode'] == target_code]
@@ -239,11 +239,10 @@ def check_postharvest_mismatch(row):
         return "PostHarvest-Noncompliance-Mismatch"
     return None
 
-# (b) Phone mismatch check (Medium risk)
+# (b) Phone mismatch check – now using the 'phone_match' column
 def check_phone_mismatch(row):
-    phone = str(row.get('Phone', "")).strip()
-    phone_hidden = str(row.get('Phone_hidden', "")).strip()
-    if phone and phone_hidden and phone != phone_hidden:
+    pm = str(row.get('phone_match', "")).strip().lower()
+    if pm != "match":
         return "Phone number mismatch"
     return None
 
@@ -253,13 +252,19 @@ def compute_total_area(row):
     polygon_cols = ['polygonplot', 'polygonplotnew_2', 'polygonplotnew_3', 'polygonplotnew_4']
     total_area = 0
     for col in polygon_cols:
-        poly_str = row.get(col)
-        if pd.notna(poly_str):
-            poly = parse_polygon_z(poly_str)
-            if poly and poly.is_valid:
+        val = row.get(col)
+        poly = None
+        if isinstance(val, str):
+            poly = parse_polygon_z(val)
+        elif isinstance(val, Polygon):
+            poly = val
+        if poly and poly.is_valid:
+            try:
                 gseries = gpd.GeoSeries([poly], crs="EPSG:4326")
                 gseries = gseries.to_crs("EPSG:2109")
                 total_area += gseries.iloc[0].area
+            except Exception as e:
+                pass
     return total_area
 
 def compute_total_plants(row):
@@ -278,8 +283,8 @@ def check_productive_plants(row):
     acres = total_area * 0.000247105
     expected = acres * 450
     total_plants = compute_total_plants(row)
-    # Debug print (comment out in production)
-    # st.write(f"Farmer {row['Farmercode']} -> Area: {total_area:.2f} m², Acres: {acres:.2f}, Expected: {expected:.2f}, Actual: {total_plants}")
+    # Uncomment the line below to debug values:
+    # st.write(f"Farmer {row['Farmercode']}: Area: {total_area:.2f} m², Acres: {acres:.2f}, Expected: {expected:.2f}, Actual: {total_plants}")
     if expected > 0:
         if total_plants > expected * 1.25 or total_plants < expected * 0.5:
             return "Total productive plants expected inconsistency"
@@ -296,7 +301,7 @@ def check_time_inconsistency(row):
     return None
 
 # ---------------------------
-# RECORD BOOLEAN FLAGS FOR EACH INCONSISTENCY
+# INCONSISTENCY FLAGS PER ROW
 # ---------------------------
 def get_inconsistency_flags(row):
     flags = {}
@@ -307,13 +312,12 @@ def get_inconsistency_flags(row):
     flags['Phone_Mismatch'] = True if check_phone_mismatch(row) else False
     flags['Productive_Plants_Inconsistency'] = True if check_productive_plants(row) else False
     flags['Time_Inconsistency'] = True if check_time_inconsistency(row) else False
-    # Overlap flag: check overlaps for this farmer
     overlaps, overall_pct = check_overlaps(gdf, row['Farmercode'])
     flags['Overlap_Inconsistency'] = True if overall_pct >= 5 else False
     return flags
 
 # ---------------------------
-# INCONSISTENCY DETECTION (Row-wise Aggregation)
+# INCONSISTENCY DETECTION (Row-wise)
 # ---------------------------
 inconsistencies_list = []
 for idx, row in df.iterrows():
@@ -325,7 +329,6 @@ for idx, row in df.iterrows():
         msg = check_fn(row)
         if msg:
             inconsistencies_list.append({'Farmercode': farmer, 'username': user, 'inconsistency': msg})
-            
 # Overlap check (aggregated per farmer)
 overlap_incons_list = []
 for code in df['Farmercode'].unique():
@@ -339,7 +342,7 @@ for code in df['Farmercode'].unique():
     if text:
         target_username = df.loc[df['Farmercode'] == code, 'username'].iloc[0]
         overlap_incons_list.append({'Farmercode': code, 'username': target_username, 'inconsistency': text})
-        
+
 inconsistencies_df = pd.DataFrame(inconsistencies_list + overlap_incons_list)
 
 # ---------------------------
@@ -461,17 +464,17 @@ if overlaps:
     st.pyplot(fig)
 
 # ---------------------------
-# EXPORT (Merged with Aggregated Risk and Individual Inconsistency Flags)
+# EXPORT (Merged with Aggregated Risk and Boolean Inconsistency Flags)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     # Create a copy for export
     export_df = df.copy()
-    # Compute individual inconsistency flags for each row
+    # Compute individual inconsistency Boolean flags for each row
     flags = export_df.apply(lambda row: pd.Series(get_inconsistency_flags(row)), axis=1)
     export_df = pd.concat([export_df, flags], axis=1)
-    # Compute area in acres using a proper GeoSeries conversion
+    # Compute area in acres using proper GeoSeries conversion
     export_df['Acres'] = gpd.GeoSeries(export_df['geometry'], crs=gdf.crs).area * 0.000247105
-    # Convert geometry to WKT string for export
+    # Convert geometry to WKT for export
     export_df['geometry'] = export_df['geometry'].apply(lambda geom: geom.wkt)
     # Merge with aggregated risk and overall inconsistency messages
     merged_df = export_df.merge(
