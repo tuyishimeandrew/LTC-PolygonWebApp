@@ -287,7 +287,7 @@ def check_productive_plants(row):
     # Uncomment the line below for debugging if needed:
     # st.write(f"Farmer {row['Farmercode']}: Area: {total_area:.2f} m², Acres: {acres:.2f}, Expected: {expected:.2f}, Actual: {total_plants}")
     if expected > 0:
-        if total_plants > expected * 1.25 or total_plants < expected * 0.5:
+        if total_plants > expected * 0.65 or total_plants < expected * 0.5:
             return "Total productive plants expected inconsistency"
     return None
 
