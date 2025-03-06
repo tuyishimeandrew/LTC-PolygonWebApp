@@ -246,10 +246,32 @@ def check_phone_mismatch(row):
         return "Phone number mismatch"
     return None
 
-# (c) Productive plants expected check
+# (c) Agrochemical mismatch check
+def check_agrochemical_mismatch(row):
+    try:
+        cond = (
+            (float(row.get('methodspestdiseasemanagement_using_chemicals', 0)) == 1) or 
+            (float(row.get('fertilizerchemicals_Pesticides', 0)) == 1) or 
+            (float(row.get('fertilizerchemicals_Fungicides', 0)) == 1) or 
+            (float(row.get('fertilizerchemicals_Herbicides', 0)) == 1) or 
+            (float(row.get('childrenlabouractivities_spraying_of_chemicals', 0)) == 1) or 
+            (float(row.get('typeworkvulnerable_Spraying_of_chemicals', 0)) == 1) or 
+            (float(row.get('agriculturalinputs_synthetic_chemicals_or_fertilize', 0)) == 1)
+        )
+    except:
+        cond = False
+    try:
+        found = float(row.get("noncompliancesfound_Agro_chemical", 0))
+    except:
+        found = 0
+    if cond and found == 0:
+        return "Agrochemical-Noncompliance-Mismatch"
+    return None
+
+# (d) Productive plants expected check
 def compute_total_area(row):
     # Sum areas from these polygon columns.
-    # Ensure that the polygon is reprojected to Uganda's CRS (EPSG:2109) before area calculation.
+    # Reproject each polygon to Uganda's CRS (EPSG:2109) before area calculation.
     polygon_cols = ['polygonplot', 'polygonplotnew_2', 'polygonplotnew_3', 'polygonplotnew_4']
     total_area = 0
     for col in polygon_cols:
@@ -261,7 +283,6 @@ def compute_total_area(row):
             poly = val
         if poly and poly.is_valid:
             try:
-                # Create a GeoSeries, assign original CRS EPSG:4326 then reproject to EPSG:2109
                 gseries = gpd.GeoSeries([poly], crs="EPSG:4326").to_crs("EPSG:2109")
                 total_area += gseries.iloc[0].area
             except Exception as e:
@@ -280,18 +301,16 @@ def compute_total_plants(row):
     return total
 
 def check_productive_plants(row):
-    total_area = compute_total_area(row)  # in m², computed in Uganda's CRS (EPSG:2109)
+    total_area = compute_total_area(row)  # in m² (Uganda CRS)
     acres = total_area * 0.000247105  # conversion factor from m² to acres
     expected = acres * 450  # expected number of plants per acre
     total_plants = compute_total_plants(row)
-    # Uncomment the line below for debugging if needed:
-    # st.write(f"Farmer {row['Farmercode']}: Area: {total_area:.2f} m², Acres: {acres:.2f}, Expected: {expected:.2f}, Actual: {total_plants}")
-    if expected > 0:
-        if total_plants > expected * 0.65 or total_plants < expected * 0.5:
-            return "Total productive plants expected inconsistency"
+    # Flag only if actual productive plants exceed 125% of expected
+    if expected > 0 and total_plants > expected * 1.25:
+        return "Total productive plants expected inconsistency"
     return None
 
-# (d) Time inconsistency check (High risk: duration < 15 mins)
+# (e) Time inconsistency check (High risk: duration < 15 mins)
 def check_time_inconsistency(row):
     try:
         duration = float(row.get('duration', 0))
@@ -310,6 +329,7 @@ def get_inconsistency_flags(row):
     flags['Environmental_Noncompliance'] = True if check_environmental_mismatch(row) else False
     flags['Agronomic_Noncompliance'] = True if check_agronomic_mismatch(row) else False
     flags['PostHarvest_Noncompliance'] = True if check_postharvest_mismatch(row) else False
+    flags['Agrochemical_Noncompliance'] = True if check_agrochemical_mismatch(row) else False
     flags['Phone_Mismatch'] = True if check_phone_mismatch(row) else False
     flags['Productive_Plants_Inconsistency'] = True if check_productive_plants(row) else False
     flags['Time_Inconsistency'] = True if check_time_inconsistency(row) else False
@@ -326,7 +346,8 @@ for idx, row in df.iterrows():
     user = row.get('username', '')
     for check_fn in [check_labour_mismatch, check_environmental_mismatch,
                      check_agronomic_mismatch, check_postharvest_mismatch,
-                     check_phone_mismatch, check_productive_plants, check_time_inconsistency]:
+                     check_agrochemical_mismatch, check_phone_mismatch,
+                     check_productive_plants, check_time_inconsistency]:
         msg = check_fn(row)
         if msg:
             inconsistencies_list.append({'Farmercode': farmer, 'username': user, 'inconsistency': msg})
