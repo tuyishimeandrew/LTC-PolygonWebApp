@@ -63,14 +63,14 @@ else:
                                       'polygonplot': 'redo_polygonplot'})
     df = df.merge(df_redo[['Farmercode', 'redo_selectplot', 'redo_polygonplot']], on='Farmercode', how='left')
     cond1 = df['polygonplot'].notna() & (df['redo_selectplot'] == 'Plot1')
-    df.loc[cond1, 'polygonplot'] = df.loc[cond1, 'redo_polygonplot']
+    df.loc[cond1, 'polygonplot'] = df.loc[cond1, 'redo_polygonplot'].apply(lambda x: str(x) if pd.notnull(x) else x)
     for new_col, plot_val in [('polygonplotnew_1', 'Plot2'),
                               ('polygonplotnew_2', 'Plot3'),
                               ('polygonplotnew_3', 'Plot4'),
                               ('polygonplotnew_4', 'Plot5')]:
         if new_col in df.columns:
             cond = df[new_col].notna() & (df['redo_selectplot'] == plot_val)
-            df.loc[cond, new_col] = df.loc[cond, 'redo_polygonplot']
+            df.loc[cond, new_col] = df.loc[cond, 'redo_polygonplot'].apply(lambda x: str(x) if pd.notnull(x) else x)
     df = df.drop(columns=['redo_selectplot', 'redo_polygonplot'])
 
 # ---------------------------
@@ -234,6 +234,22 @@ def check_labour_mismatch(row):
         return "Labour-Noncompliance-Mismatch"
     return None
 
+# Environmental (added this missing function)
+def check_environmental_mismatch(row):
+    cond = (
+        (str(row.get('cutnativetrees', '')).strip().lower() == "yes") or
+        (str(row.get('cutforests', '')).strip().lower() == "yes") or
+        (str(row.get('toiletdischarge', '')).strip().lower() == "yes") or
+        (str(row.get('separatewaste', '')).strip().lower() == "no")
+    )
+    try:
+        found = float(row.get("noncompliancesfound_Environmental", 0))
+    except:
+        found = 0
+    if cond and found == 0:
+        return "Environmental-Noncompliance-Mismatch"
+    return None
+
 # Agrochemical
 def agrochemical_condition_flag(row):
     try:
@@ -336,6 +352,16 @@ def get_inconsistency_flags(row):
     flags['Labour_Condition_Flag'] = labour_condition_flag(row)
     flags['Labour_Noncompliance_Flag'] = True if labour_msg else False
     flags['Labour_Noncompliance_Advice'] = labour_msg if labour_msg else "None of the above"
+    # Environmental
+    env_msg = check_environmental_mismatch(row)
+    flags['Environmental_Condition_Flag'] = True if (
+        (str(row.get('cutnativetrees', '')).strip().lower() == "yes") or 
+        (str(row.get('cutforests', '')).strip().lower() == "yes") or 
+        (str(row.get('toiletdischarge', '')).strip().lower() == "yes") or 
+        (str(row.get('separatewaste', '')).strip().lower() == "no")
+    ) else False
+    flags['Environmental_Noncompliance_Flag'] = True if env_msg else False
+    flags['Environmental_Noncompliance_Advice'] = env_msg if env_msg else "None of the above"
     # Agrochemical
     agro_msg = check_agrochemical_mismatch(row)
     flags['Agrochemical_Condition_Flag'] = agrochemical_condition_flag(row)
@@ -376,7 +402,7 @@ for idx, row in df.iterrows():
     farmer = row['Farmercode']
     user = row.get('username', '')
     # Check each noncompliance / inconsistency function individually
-    for check_fn in [check_labour_mismatch, check_environmental_mismatch,  # environmental remains unchanged
+    for check_fn in [check_labour_mismatch, check_environmental_mismatch,
                      check_agronomic_mismatch, check_postharvest_mismatch,
                      check_agrochemical_mismatch, check_phone_mismatch,
                      check_time_inconsistency, lambda r: compute_productive_plants_metrics(r)["Productive_Plants_Inconsistency"]]:
