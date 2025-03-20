@@ -76,7 +76,6 @@ else:
 # ---------------------------
 # DATE SLIDER FILTERING
 # ---------------------------
-# Use "Submissiondate" if available; otherwise "SubmissionDate"
 if 'Submissiondate' in df.columns:
     df['Submissiondate'] = pd.to_datetime(df['Submissiondate'], errors='coerce')
 elif 'SubmissionDate' in df.columns:
@@ -177,9 +176,46 @@ def plot_geometry(ax, geom, color, label, text_label):
                 ax.text(cx, cy, f"{text_label:.1f}%", fontsize=10, color='white', ha='center', va='center')
 
 # ---------------------------
-# HELPER FUNCTIONS FOR INCONSISTENCY CHECKS
+# NEW PRODUCTIVE PLANTS CALCULATION
 # ---------------------------
-# (a) Noncompliance mismatch checks
+def compute_productive_plants_metrics(row):
+    # Sum all columns whose header contains 'acres_polygonplot'
+    total_area = 0
+    for col in row.index:
+        if "acres_polygonplot" in col.lower() and pd.notnull(row[col]):
+            try:
+                total_area += float(row[col])
+            except:
+                continue
+    # Sum all columns whose header contains 'productiveplants'
+    total_plants = 0
+    for col in row.index:
+        if "productiveplants" in col.lower() and pd.notnull(row[col]):
+            try:
+                total_plants += float(row[col])
+            except:
+                continue
+    expected = total_area * 450
+    half_expected = expected / 2
+    pct125_expected = expected * 1.25
+    if total_plants < half_expected:
+        inconsistency = "Less than Expected Productive Plants"
+    elif total_plants > pct125_expected:
+        inconsistency = "More than expected Productive Plants"
+    else:
+        inconsistency = ""
+    return pd.Series({
+        "Total_Area": total_area,
+        "Total_Productive_Plants": total_plants,
+        "Expected_Plants": expected,
+        "Half_Expected_Plants": half_expected,
+        "Pct125_Expected_Plants": pct125_expected,
+        "Productive_Plants_Inconsistency": inconsistency
+    })
+
+# ---------------------------
+# NONCOMPLIANCE CHECK FUNCTIONS (unchanged logic)
+# ---------------------------
 def check_labour_mismatch(row):
     cond = (
         (str(row.get('childrenworkingconditions', '')).strip().lower() == "any_time_when_needed") or
@@ -239,14 +275,12 @@ def check_postharvest_mismatch(row):
         return "PostHarvest-Noncompliance-Mismatch"
     return None
 
-# (b) Phone mismatch check – using the 'phone_match' column
 def check_phone_mismatch(row):
     pm = str(row.get('phone_match', "")).strip().lower()
     if pm != "match":
         return "Phone number mismatch"
     return None
 
-# (c) Agrochemical mismatch check
 def check_agrochemical_mismatch(row):
     try:
         cond = (
@@ -268,49 +302,6 @@ def check_agrochemical_mismatch(row):
         return "Agrochemical-Noncompliance-Mismatch"
     return None
 
-# (d) Productive plants expected check
-def compute_total_area(row):
-    # Sum areas from these polygon columns.
-    # Reproject each polygon to Uganda's CRS (EPSG:2109) before area calculation.
-    polygon_cols = ['polygonplot', 'polygonplotnew_2', 'polygonplotnew_3', 'polygonplotnew_4']
-    total_area = 0
-    for col in polygon_cols:
-        val = row.get(col)
-        poly = None
-        if isinstance(val, str):
-            poly = parse_polygon_z(val)
-        elif isinstance(val, Polygon):
-            poly = val
-        if poly and poly.is_valid:
-            try:
-                gseries = gpd.GeoSeries([poly], crs="EPSG:4326").to_crs("EPSG:2109")
-                total_area += gseries.iloc[0].area
-            except Exception as e:
-                pass
-    return total_area
-
-def compute_total_plants(row):
-    # Sum productive plants from these columns
-    plant_cols = ['Productiveplants', 'Productiveplantsnew_1', 'Productiveplantsnew_2', 'Productiveplantsnew_3', 'Productiveplantsnew_4']
-    total = 0
-    for col in plant_cols:
-        try:
-            total += float(row.get(col, 0))
-        except:
-            continue
-    return total
-
-def check_productive_plants(row):
-    total_area = compute_total_area(row)  # in m² (Uganda CRS)
-    acres = total_area * 0.000247105  # conversion factor from m² to acres
-    expected = acres * 450  # expected number of plants per acre
-    total_plants = compute_total_plants(row)
-    # Flag only if actual productive plants exceed 125% of expected
-    if expected > 0 and total_plants > expected * 1.25:
-        return "Total productive plants expected inconsistency"
-    return None
-
-# (e) Time inconsistency check (High risk: duration < 15 mins)
 def check_time_inconsistency(row):
     try:
         duration = float(row.get('duration', 0))
@@ -321,33 +312,59 @@ def check_time_inconsistency(row):
     return None
 
 # ---------------------------
-# INCONSISTENCY FLAGS PER ROW
+# NEW: AGGREGATED FLAG/ADVICE FOR NONCOMPLIANCE CATEGORIES
 # ---------------------------
 def get_inconsistency_flags(row):
     flags = {}
-    flags['Labour_Noncompliance'] = True if check_labour_mismatch(row) else False
-    flags['Environmental_Noncompliance'] = True if check_environmental_mismatch(row) else False
-    flags['Agronomic_Noncompliance'] = True if check_agronomic_mismatch(row) else False
-    flags['PostHarvest_Noncompliance'] = True if check_postharvest_mismatch(row) else False
-    flags['Agrochemical_Noncompliance'] = True if check_agrochemical_mismatch(row) else False
-    flags['Phone_Mismatch'] = True if check_phone_mismatch(row) else False
-    flags['Productive_Plants_Inconsistency'] = True if check_productive_plants(row) else False
-    flags['Time_Inconsistency'] = True if check_time_inconsistency(row) else False
+    # Labour
+    labour_msg = check_labour_mismatch(row)
+    flags['Labour_Noncompliance_Flag'] = True if labour_msg else False
+    flags['Labour_Noncompliance_Advice'] = labour_msg if labour_msg else "None of the above"
+    # Environmental
+    env_msg = check_environmental_mismatch(row)
+    flags['Environmental_Noncompliance_Flag'] = True if env_msg else False
+    flags['Environmental_Noncompliance_Advice'] = env_msg if env_msg else "None of the above"
+    # Agronomic
+    agr_msg = check_agronomic_mismatch(row)
+    flags['Agronomic_Noncompliance_Flag'] = True if agr_msg else False
+    flags['Agronomic_Noncompliance_Advice'] = agr_msg if agr_msg else "None of the above"
+    # PostHarvest
+    post_msg = check_postharvest_mismatch(row)
+    flags['PostHarvest_Noncompliance_Flag'] = True if post_msg else False
+    flags['PostHarvest_Noncompliance_Advice'] = post_msg if post_msg else "None of the above"
+    # Agrochemical
+    agro_msg = check_agrochemical_mismatch(row)
+    flags['Agrochemical_Noncompliance_Flag'] = True if agro_msg else False
+    flags['Agrochemical_Noncompliance_Advice'] = agro_msg if agro_msg else "None of the above"
+    # Phone
+    phone_msg = check_phone_mismatch(row)
+    flags['Phone_Mismatch_Flag'] = True if phone_msg else False
+    flags['Phone_Mismatch_Advice'] = phone_msg if phone_msg else "None of the above"
+    # Productive plants using new calculation
+    prod_metrics = compute_productive_plants_metrics(row)
+    flags = {**flags, **prod_metrics.to_dict()}
+    # Time inconsistency
+    time_msg = check_time_inconsistency(row)
+    flags['Time_Inconsistency_Flag'] = True if time_msg else False
+    flags['Time_Inconsistency_Advice'] = time_msg if time_msg else "None of the above"
+    # Overlap check remains the same
     overlaps, overall_pct = check_overlaps(gdf, row['Farmercode'])
-    flags['Overlap_Inconsistency'] = True if overall_pct >= 5 else False
+    flags['Overlap_Inconsistency_Flag'] = True if overall_pct >= 5 else False
+    flags['Overlap_Inconsistency_Advice'] = (f"Overlap {overall_pct:.2f}%" if overall_pct >= 5 else "None of the above")
     return flags
 
 # ---------------------------
-# INCONSISTENCY DETECTION (Row-wise)
+# INCONSISTENCY DETECTION (Row-wise Aggregation)
 # ---------------------------
 inconsistencies_list = []
 for idx, row in df.iterrows():
     farmer = row['Farmercode']
     user = row.get('username', '')
+    # Check each noncompliance / inconsistency function individually
     for check_fn in [check_labour_mismatch, check_environmental_mismatch,
                      check_agronomic_mismatch, check_postharvest_mismatch,
                      check_agrochemical_mismatch, check_phone_mismatch,
-                     check_productive_plants, check_time_inconsistency]:
+                     check_time_inconsistency, lambda r: compute_productive_plants_metrics(r)["Productive_Plants_Inconsistency"]]:
         msg = check_fn(row)
         if msg:
             inconsistencies_list.append({'Farmercode': farmer, 'username': user, 'inconsistency': msg})
@@ -374,7 +391,8 @@ risk_order = {"High": 3, "Medium": 2, "Low": 1, "None": 0}
 def get_risk_rating(inc_text):
     inc_text_lower = inc_text.lower()
     if ("noncompliance-mismatch" in inc_text_lower or 
-        "total productive plants" in inc_text_lower or 
+        "less than expected" in inc_text_lower or 
+        "more than expected" in inc_text_lower or 
         "time inconsistency" in inc_text_lower):
          return "High"
     if "overlap >" in inc_text_lower:
@@ -491,7 +509,7 @@ if overlaps:
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     # Create a copy for export
     export_df = df.copy()
-    # Compute individual inconsistency Boolean flags for each row
+    # Compute individual inconsistency Boolean flags and new metrics for each row
     flags = export_df.apply(lambda row: pd.Series(get_inconsistency_flags(row)), axis=1)
     export_df = pd.concat([export_df, flags], axis=1)
     # Compute area in acres using proper GeoSeries conversion (using Uganda's CRS EPSG:2109)
