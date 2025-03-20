@@ -214,64 +214,100 @@ def compute_productive_plants_metrics(row):
     })
 
 # ---------------------------
-# NONCOMPLIANCE CHECK FUNCTIONS (unchanged logic)
+# NONCOMPLIANCE CHECK FUNCTIONS WITH TWO-STEP PROCESS
 # ---------------------------
+# Labour
+def labour_condition_flag(row):
+    cond1 = (str(row.get('childrenworkingconditions', '')).strip().lower() == "any_time_when_needed")
+    cond2 = (str(row.get('prisoners', '')).strip().lower() == "yes")
+    cond3 = (str(row.get('contractsworkers', '')).strip().lower() == "no")
+    cond4 = (str(row.get('drinkingwaterworkers', '')).strip().lower() == "no")
+    return cond1 or cond2 or cond3 or cond4
+
 def check_labour_mismatch(row):
-    cond = (
-        (str(row.get('childrenworkingconditions', '')).strip().lower() == "any_time_when_needed") or
-        (str(row.get('prisoners', '')).strip().lower() == "yes") or
-        (str(row.get('contractsworkers', '')).strip().lower() == "no") or
-        (str(row.get('drinkingwaterworkers', '')).strip().lower() == "no")
-    )
+    condition = labour_condition_flag(row)
     try:
         found = float(row.get("noncompliancesfound_Labour", 0))
     except:
         found = 0
-    if cond and found == 0:
+    if condition and found == 0:
         return "Labour-Noncompliance-Mismatch"
     return None
 
-def check_environmental_mismatch(row):
-    cond = (
-        (str(row.get('cutnativetrees', '')).strip().lower() == "yes") or
-        (str(row.get('cutforests', '')).strip().lower() == "yes") or
-        (str(row.get('toiletdischarge', '')).strip().lower() == "yes") or
-        (str(row.get('separatewaste', '')).strip().lower() == "no")
-    )
+# Agrochemical
+def agrochemical_condition_flag(row):
     try:
-        found = float(row.get("noncompliancesfound_Environmental", 0))
+        cond1 = (float(row.get('methodspestdiseasemanagement_using_chemicals', 0)) == 1)
+    except:
+        cond1 = False
+    try:
+        cond2 = (float(row.get('fertilizerchemicals_Pesticides', 0)) == 1)
+    except:
+        cond2 = False
+    try:
+        cond3 = (float(row.get('fertilizerchemicals_Fungicides', 0)) == 1)
+    except:
+        cond3 = False
+    try:
+        cond4 = (float(row.get('fertilizerchemicals_Herbicides', 0)) == 1)
+    except:
+        cond4 = False
+    try:
+        cond5 = (float(row.get('childrenlabouractivities_spraying_of_chemicals', 0)) == 1)
+    except:
+        cond5 = False
+    try:
+        cond6 = (float(row.get('typeworkvulnerable_Spraying_of_chemicals', 0)) == 1)
+    except:
+        cond6 = False
+    try:
+        cond7 = (float(row.get('agriculturalinputs_synthetic_chemicals_or_fertilize', 0)) == 1)
+    except:
+        cond7 = False
+    return cond1 or cond2 or cond3 or cond4 or cond5 or cond6 or cond7
+
+def check_agrochemical_mismatch(row):
+    condition = agrochemical_condition_flag(row)
+    try:
+        found = float(row.get("noncompliancesfound_Agro_chemical", 0))
     except:
         found = 0
-    if cond and found == 0:
-        return "Environmental-Noncompliance-Mismatch"
+    if condition and found == 0:
+        return "Agrochemical-Noncompliance-Mismatch"
     return None
 
+# Agronomic
+def agronomic_condition_flag(row):
+    cond1 = (str(row.get('pruning', '')).strip().lower() == "no")
+    cond2 = (str(row.get('desuckering', '')).strip().lower() == "no")
+    cond3 = (str(row.get('manageweeds', '')).strip().lower() == "no")
+    cond4 = (str(row.get('knowledgeIPM', '')).strip().lower() == "no")
+    return cond1 or cond2 or cond3 or cond4
+
 def check_agronomic_mismatch(row):
-    cond = (
-        (str(row.get('pruning', '')).strip().lower() == "no") or
-        (str(row.get('desuckering', '')).strip().lower() == "no") or
-        (str(row.get('manageweeds', '')).strip().lower() == "no") or
-        (str(row.get('knowledgeIPM', '')).strip().lower() == "no")
-    )
+    condition = agronomic_condition_flag(row)
     try:
         found = float(row.get("noncompliancesfound_Agronomic", 0))
     except:
         found = 0
-    if cond and found == 0:
+    if condition and found == 0:
         return "Agronomic-Noncompliance-Mismatch"
     return None
 
+# PostHarvest
+def postharvest_condition_flag(row):
+    cond1 = (str(row.get('ripepods', '')).strip().lower() == "no")
+    cond2 = (str(row.get('storedrycocoa', '')).strip().lower() == "no")
+    cond3 = (str(row.get('separatebasins', '')).strip().lower() == "no")
+    return cond1 or cond2 or cond3
+
 def check_postharvest_mismatch(row):
-    cond = (
-        (str(row.get('ripepods', '')).strip().lower() == "no") or
-        (str(row.get('storedrycocoa', '')).strip().lower() == "no") or
-        (str(row.get('separatebasins', '')).strip().lower() == "no")
-    )
+    condition = postharvest_condition_flag(row)
     try:
         found = float(row.get("noncompliancesfound_Harvest_and_postharvestt", 0))
     except:
         found = 0
-    if cond and found == 0:
+    if condition and found == 0:
         return "PostHarvest-Noncompliance-Mismatch"
     return None
 
@@ -279,27 +315,6 @@ def check_phone_mismatch(row):
     pm = str(row.get('phone_match', "")).strip().lower()
     if pm != "match":
         return "Phone number mismatch"
-    return None
-
-def check_agrochemical_mismatch(row):
-    try:
-        cond = (
-            (float(row.get('methodspestdiseasemanagement_using_chemicals', 0)) == 1) or 
-            (float(row.get('fertilizerchemicals_Pesticides', 0)) == 1) or 
-            (float(row.get('fertilizerchemicals_Fungicides', 0)) == 1) or 
-            (float(row.get('fertilizerchemicals_Herbicides', 0)) == 1) or 
-            (float(row.get('childrenlabouractivities_spraying_of_chemicals', 0)) == 1) or 
-            (float(row.get('typeworkvulnerable_Spraying_of_chemicals', 0)) == 1) or 
-            (float(row.get('agriculturalinputs_synthetic_chemicals_or_fertilize', 0)) == 1)
-        )
-    except:
-        cond = False
-    try:
-        found = float(row.get("noncompliancesfound_Agro_chemical", 0))
-    except:
-        found = 0
-    if cond and found == 0:
-        return "Agrochemical-Noncompliance-Mismatch"
     return None
 
 def check_time_inconsistency(row):
@@ -312,30 +327,30 @@ def check_time_inconsistency(row):
     return None
 
 # ---------------------------
-# NEW: AGGREGATED FLAG/ADVICE FOR NONCOMPLIANCE CATEGORIES
+# AGGREGATED FLAG/ADVICE FOR NONCOMPLIANCE CATEGORIES
 # ---------------------------
 def get_inconsistency_flags(row):
     flags = {}
     # Labour
     labour_msg = check_labour_mismatch(row)
+    flags['Labour_Condition_Flag'] = labour_condition_flag(row)
     flags['Labour_Noncompliance_Flag'] = True if labour_msg else False
     flags['Labour_Noncompliance_Advice'] = labour_msg if labour_msg else "None of the above"
-    # Environmental
-    env_msg = check_environmental_mismatch(row)
-    flags['Environmental_Noncompliance_Flag'] = True if env_msg else False
-    flags['Environmental_Noncompliance_Advice'] = env_msg if env_msg else "None of the above"
+    # Agrochemical
+    agro_msg = check_agrochemical_mismatch(row)
+    flags['Agrochemical_Condition_Flag'] = agrochemical_condition_flag(row)
+    flags['Agrochemical_Noncompliance_Flag'] = True if agro_msg else False
+    flags['Agrochemical_Noncompliance_Advice'] = agro_msg if agro_msg else "None of the above"
     # Agronomic
     agr_msg = check_agronomic_mismatch(row)
+    flags['Agronomic_Condition_Flag'] = agronomic_condition_flag(row)
     flags['Agronomic_Noncompliance_Flag'] = True if agr_msg else False
     flags['Agronomic_Noncompliance_Advice'] = agr_msg if agr_msg else "None of the above"
     # PostHarvest
     post_msg = check_postharvest_mismatch(row)
+    flags['PostHarvest_Condition_Flag'] = postharvest_condition_flag(row)
     flags['PostHarvest_Noncompliance_Flag'] = True if post_msg else False
     flags['PostHarvest_Noncompliance_Advice'] = post_msg if post_msg else "None of the above"
-    # Agrochemical
-    agro_msg = check_agrochemical_mismatch(row)
-    flags['Agrochemical_Noncompliance_Flag'] = True if agro_msg else False
-    flags['Agrochemical_Noncompliance_Advice'] = agro_msg if agro_msg else "None of the above"
     # Phone
     phone_msg = check_phone_mismatch(row)
     flags['Phone_Mismatch_Flag'] = True if phone_msg else False
@@ -361,7 +376,7 @@ for idx, row in df.iterrows():
     farmer = row['Farmercode']
     user = row.get('username', '')
     # Check each noncompliance / inconsistency function individually
-    for check_fn in [check_labour_mismatch, check_environmental_mismatch,
+    for check_fn in [check_labour_mismatch, check_environmental_mismatch,  # environmental remains unchanged
                      check_agronomic_mismatch, check_postharvest_mismatch,
                      check_agrochemical_mismatch, check_phone_mismatch,
                      check_time_inconsistency, lambda r: compute_productive_plants_metrics(r)["Productive_Plants_Inconsistency"]]:
