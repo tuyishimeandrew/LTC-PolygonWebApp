@@ -223,7 +223,7 @@ def check_labour_mismatch(row):
         found = float(row.get("noncompliancesfound_Labour", 0))
     except:
         found = 0
-    # Award point if either no flag OR if flag exists and noncompliance is recorded (found > 0)
+    # Award point (i.e. no penalty) if either no labour issue is flagged or if flagged and noncompliance recorded.
     return "Labour-Noncompliance-Mismatch" if labour_Registered(row) and found == 0 else None
 
 def check_environmental_mismatch(row):
@@ -395,7 +395,7 @@ def compute_rating(row):
     if pd.notnull(productiveplants):
         if productiveplants >= (youngplants + stumpedplants + shadeplants):
             score += 1
-    # Labour Noncompliance: reward if either no flag OR if flagged and NC recorded
+    # Labour Noncompliance: reward if either no flag OR if flagged and noncompliance recorded
     labour_flag = (str(row.get("childrenworkingconditions", "")).strip().lower() == "any_time_when_needed" or
                    str(row.get("prisoners", "")).strip().lower() == "yes" or
                    str(row.get("contractsworkers", "")).strip().lower() == "no" or
@@ -533,7 +533,7 @@ if not target_row.empty:
         st.pyplot(fig)
 
 # ---------------------------
-# EXPORT FUNCTION
+# EXPORT FUNCTION (with total_rating & average_rating_per_username columns)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     export_df = df.copy()
@@ -548,7 +548,7 @@ def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     merged_df['inconsistency'] = merged_df['inconsistency'].fillna("No Inconsistency")
     merged_df['Risk Rating'] = merged_df['Risk Rating'].fillna("None")
     merged_df['Trust Responses'] = merged_df['Trust Responses'].fillna("Yes")
-    # Recalculate and merge rating columns
+    # Recalculate the rating per row and merge average rating per inspector
     merged_df["total_rating"] = merged_df.apply(compute_rating, axis=1)
     avg_rating = merged_df.groupby('username')["total_rating"].mean().reset_index().rename(columns={"total_rating": "average_rating_per_username"})
     merged_df = merged_df.merge(avg_rating, on='username', how='left')
