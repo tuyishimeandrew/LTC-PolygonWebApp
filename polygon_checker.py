@@ -32,7 +32,6 @@ except Exception as e:
     st.error("Error loading main file: " + str(e))
     st.stop()
 
-# Require essential columns in main file.
 if 'Farmercode' not in df.columns or 'polygonplot' not in df.columns:
     st.error("The Main Inspection Form must contain 'Farmercode' and 'polygonplot' columns.")
     st.stop()
@@ -106,7 +105,6 @@ def parse_polygon_z(polygon_str):
     return Polygon(vertices) if len(vertices) >= 3 else None
 
 def combine_polygons(row):
-    # Combine available polygon columns for mapping
     cols = ['polygonplot', 'polygonplotnew_1', 'polygonplotnew_2', 'polygonplotnew_3', 'polygonplotnew_4']
     polys = [parse_polygon_z(row[col]) for col in cols if col in row and pd.notna(row[col])]
     valid_polys = []
@@ -225,6 +223,7 @@ def check_labour_mismatch(row):
         found = float(row.get("noncompliancesfound_Labour", 0))
     except:
         found = 0
+    # Award point if either no flag OR if flag exists and noncompliance is recorded (found > 0)
     return "Labour-Noncompliance-Mismatch" if labour_Registered(row) and found == 0 else None
 
 def check_environmental_mismatch(row):
@@ -239,34 +238,20 @@ def check_environmental_mismatch(row):
     return "Environmental-Noncompliance-Mismatch" if cond and found == 0 else None
 
 def agrochemical_Registered(row):
-    try:
-        cond1 = (float(row.get('methodspestdiseasemanagement_using_chemicals', 0)) == 1)
-    except:
-        cond1 = False
-    try:
-        cond2 = (float(row.get('fertilizerchemicals_Pesticides', 0)) == 1)
-    except:
-        cond2 = False
-    try:
-        cond3 = (float(row.get('fertilizerchemicals_Fungicides', 0)) == 1)
-    except:
-        cond3 = False
-    try:
-        cond4 = (float(row.get('fertilizerchemicals_Herbicides', 0)) == 1)
-    except:
-        cond4 = False
-    try:
-        cond5 = (float(row.get('childrenlabouractivities_spraying_of_chemicals', 0)) == 1)
-    except:
-        cond5 = False
-    try:
-        cond6 = (float(row.get('typeworkvulnerable_Spraying_of_chemicals', 0)) == 1)
-    except:
-        cond6 = False
-    try:
-        cond7 = (float(row.get('agriculturalinputs_synthetic_chemicals_or_fertilize', 0)) == 1)
-    except:
-        cond7 = False
+    try: cond1 = (float(row.get('methodspestdiseasemanagement_using_chemicals', 0)) == 1)
+    except: cond1 = False
+    try: cond2 = (float(row.get('fertilizerchemicals_Pesticides', 0)) == 1)
+    except: cond2 = False
+    try: cond3 = (float(row.get('fertilizerchemicals_Fungicides', 0)) == 1)
+    except: cond3 = False
+    try: cond4 = (float(row.get('fertilizerchemicals_Herbicides', 0)) == 1)
+    except: cond4 = False
+    try: cond5 = (float(row.get('childrenlabouractivities_spraying_of_chemicals', 0)) == 1)
+    except: cond5 = False
+    try: cond6 = (float(row.get('typeworkvulnerable_Spraying_of_chemicals', 0)) == 1)
+    except: cond6 = False
+    try: cond7 = (float(row.get('agriculturalinputs_synthetic_chemicals_or_fertilize', 0)) == 1)
+    except: cond7 = False
     return cond1 or cond2 or cond3 or cond4 or cond5 or cond6 or cond7
 
 def check_agrochemical_mismatch(row):
@@ -323,10 +308,8 @@ def get_inconsistency_flags(row):
     flags['PostHarvest_Noncompliance_Advice'] = check_postharvest_mismatch(row) or "None of the above"
     flags['Phone_Mismatch_Advice'] = check_phone_mismatch(row) or "None of the above"
     flags['Time_Inconsistency_Advice'] = check_time_inconsistency(row) or "None of the above"
-    # Productive plants metrics:
     prod_metrics = compute_productive_plants_metrics(row)
     flags = {**flags, **prod_metrics.to_dict()}
-    # Overlap check:
     overlaps, overall_pct = check_overlaps(gdf, row['Farmercode'])
     flags['Overlap_Inconsistency_Advice'] = (f"Overlap {overall_pct:.2f}%" if overall_pct >= 5 else "None of the above")
     return flags
@@ -359,7 +342,6 @@ for code in df['Farmercode'].unique():
         overlap_incons_list.append({'Farmercode': code, 'username': target_username, 'inconsistency': text})
 inconsistencies_df = pd.DataFrame(inconsistencies_list + overlap_incons_list)
 
-# Risk rating (for aggregated message)
 risk_order = {"High": 3, "Medium": 2, "Low": 1, "None": 0}
 def get_risk_rating(inc_text):
     inc_text_lower = inc_text.lower()
@@ -388,10 +370,9 @@ else:
 # ---------------------------
 # BEST INSPECTORS CHART (by average rating)
 # ---------------------------
-# First, calculate total_rating for each record (using the updated compute_rating)
 def compute_rating(row):
     score = 0
-    # (1) Basic Conditions (removed contract & receipts conditions)
+    # Basic Conditions (contract and receipts removed)
     if str(row.get("phone_match", "")).strip().lower() == "match":
         score += 1
     if row.get("duration", 0) > 900:
@@ -414,21 +395,21 @@ def compute_rating(row):
     if pd.notnull(productiveplants):
         if productiveplants >= (youngplants + stumpedplants + shadeplants):
             score += 1
-    # (2) Labour Noncompliance
+    # Labour Noncompliance: reward if either no flag OR if flagged and NC recorded
     labour_flag = (str(row.get("childrenworkingconditions", "")).strip().lower() == "any_time_when_needed" or
                    str(row.get("prisoners", "")).strip().lower() == "yes" or
                    str(row.get("contractsworkers", "")).strip().lower() == "no" or
                    str(row.get("drinkingwaterworkers", "")).strip().lower() == "no")
     if not (labour_flag and (row.get("noncompliancesfound_Labour", 0) == 0)):
         score += 1
-    # (3) Environmental Noncompliance
+    # Environmental Noncompliance
     env_flag = (str(row.get("cutnativetrees", "")).strip().lower() == "yes" or
                 str(row.get("cutforests", "")).strip().lower() == "yes" or
                 str(row.get("toiletdischarge", "")).strip().lower() == "yes" or
                 str(row.get("separatewaste", "")).strip().lower() == "no")
     if not (env_flag and (row.get("noncompliancesfound_Environmental", 0) == 0)):
         score += 1
-    # (4) Agrochemical Noncompliance
+    # Agrochemical Noncompliance
     agro_columns = ["methodspestdiseasemanagement_using_chemicals",
                     "fertilizerchemicals_Pesticides",
                     "fertilizerchemicals_Fungicides",
@@ -446,17 +427,17 @@ def compute_rating(row):
             pass
     if not (agro_flag and (row.get("noncompliancesfound_Agro_chemical", 0) == 0)):
         score += 1
-    # (5) Agronomic Noncompliance
+    # Agronomic Noncompliance
     agronomic_columns = ["pruning", "desuckering", "manageweeds", "knowledgeIPM"]
     if not (any(str(row.get(col, "")).strip().lower() == "no" for col in agronomic_columns) and 
             (row.get("noncompliancesfound_Agronomic", 0) == 0)):
         score += 1
-    # (6) Postharvest Noncompliance
+    # Postharvest Noncompliance
     postharvest_columns = ["ripepods", "storedrycocoa", "separatebasins"]
     if not (any(str(row.get(col, "")).strip().lower() == "no" for col in postharvest_columns) and
             (row.get("noncompliancesfound_Harvest_and_postharvestt", 0) == 0)):
         score += 1
-    # (7) Productive Plants Inconsistency
+    # Productive Plants Inconsistency
     total_area = 0
     total_productive_plants = 0
     for col in row.index:
@@ -473,7 +454,7 @@ def compute_rating(row):
     expected_plants = total_area * 450
     if total_productive_plants <= 1.25 * expected_plants:
         score += 1
-    # (8) Polygon Overlap Condition (Extra point if overlap is less than 5%)
+    # Polygon Overlap: award extra point if overlap is less than 5%
     farmer = row.get("Farmercode")
     if pd.notnull(farmer):
         _, overall_pct = check_overlaps(gdf, farmer)
@@ -481,11 +462,11 @@ def compute_rating(row):
             score += 1
     return score
 
-# Compute total_rating and merge average rating per inspector
+# Compute total_rating for each inspection record
 df["total_rating"] = df.apply(compute_rating, axis=1)
 inspector_rating = df.groupby('username')["total_rating"].mean().reset_index()
 
-# If district column exists, allow filtering via selectbox
+# District filtering for best inspectors if available
 if "district" in df.columns:
     districts = sorted(df["district"].dropna().unique().tolist())
     selected_district = st.selectbox("Select District", ["All Districts"] + districts)
@@ -532,7 +513,6 @@ if not target_row.empty:
         st.write(f"Total Overlap Percentage: {overall_pct:.2f}%")
     else:
         st.success("No overlaps found for this farmer.")
-    
     if overlaps:
         target_poly = target_row.geometry.iloc[0]
         fig, ax = plt.subplots(figsize=(8,8))
@@ -568,7 +548,7 @@ def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     merged_df['inconsistency'] = merged_df['inconsistency'].fillna("No Inconsistency")
     merged_df['Risk Rating'] = merged_df['Risk Rating'].fillna("None")
     merged_df['Trust Responses'] = merged_df['Trust Responses'].fillna("Yes")
-    # Recalculate total_rating and merge average rating per inspector
+    # Recalculate and merge rating columns
     merged_df["total_rating"] = merged_df.apply(compute_rating, axis=1)
     avg_rating = merged_df.groupby('username')["total_rating"].mean().reset_index().rename(columns={"total_rating": "average_rating_per_username"})
     merged_df = merged_df.merge(avg_rating, on='username', how='left')
