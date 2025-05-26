@@ -7,238 +7,208 @@ from shapely.ops import unary_union
 import io
 
 st.set_page_config(layout="wide")
-st.title("Latitude Inspections Inconsistency & Cleaning Checker (Optimized)")
+st.title("Latitude Inspections Inconsistency Checker")
 
 # ---------------------------
-# FILE UPLOAD & DATA LOAD
+# FILE UPLOAD
 # ---------------------------
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Main Inspection File")
-    main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)", type=["xlsx","csv"], key="main_upload")
+    main_file = st.file_uploader("Upload Main Inspection Form (CSV or Excel)", type=["xlsx", "csv"], key="main_upload")
 with col2:
     st.subheader("Redo Polygon File")
-    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)", type=["xlsx","csv"], key="redo_upload")
-if not main_file or not redo_file:
+    redo_file = st.file_uploader("Upload Redo Polygon Form (CSV or Excel)", type=["xlsx", "csv"], key="redo_upload")
+
+if main_file is None or redo_file is None:
     st.info("Please upload both Main Inspection and Redo Polygon files.")
     st.stop()
+
+# Load main file
 try:
-    df = pd.read_excel(main_file, engine='openpyxl') if main_file.name.endswith('.xlsx') else pd.read_csv(main_file)
-    df_redo = pd.read_excel(redo_file, engine='openpyxl') if redo_file.name.endswith('.xlsx') else pd.read_csv(redo_file)
+    if main_file.name.endswith('.xlsx'):
+        df = pd.read_excel(main_file, engine='openpyxl')
+    else:
+        df = pd.read_csv(main_file)
 except Exception as e:
-    st.error(f"Error loading files: {e}")
+    st.error(f"Error loading main file: {e}")
     st.stop()
 
-# ---------------------------
-# MERGE LATEST REDO
-# ---------------------------
-if 'farmer_code' in df_redo.columns:
-    df_redo.rename(columns={'farmer_code':'Farmercode'}, inplace=True)
-if not {'Farmercode','selectplot','polygonplot'}.issubset(df_redo.columns):
-    st.error("Redo file missing required columns: Farmercode, selectplot, polygonplot.")
+# Validate main columns
+if 'Farmercode' not in df.columns or 'polygonplot' not in df.columns:
+    st.error("Main Inspection Form must contain 'Farmercode' and 'polygonplot'.")
     st.stop()
-df_redo['SubmissionDate'] = pd.to_datetime(df_redo.get('SubmissionDate'), errors='coerce')
-df_redo['endtime'] = pd.to_datetime(df_redo.get('endtime'), errors='coerce')
-df_redo = df_redo.sort_values(['SubmissionDate','endtime']).groupby('Farmercode', as_index=False).last()
-df_redo.rename(columns={'selectplot':'redo_selectplot','polygonplot':'redo_polygonplot'}, inplace=True)
-df = df.merge(df_redo[['Farmercode','redo_selectplot','redo_polygonplot']], on='Farmercode', how='left')
-for orig,plot in [('polygonplot','Plot1'),('polygonplotnew_1','Plot2'),('polygonplotnew_2','Plot3'),('polygonplotnew_3','Plot4'),('polygonplotnew_4','Plot5')]:
-    if orig in df.columns:
-        mask = df[orig].notna() & (df['redo_selectplot']==plot)
-        df.loc[mask, orig] = df.loc[mask, 'redo_polygonplot']
-df.drop(['redo_selectplot','redo_polygonplot'], axis=1, inplace=True)
+
+# Load redo file
+try:
+    if redo_file.name.endswith('.xlsx'):
+        df_redo = pd.read_excel(redo_file, engine='openpyxl')
+    else:
+        df_redo = pd.read_csv(redo_file)
+except Exception as e:
+    st.error(f"Error loading redo file: {e}")
+    st.stop()
+
+# Normalize redo columns
+if 'farmer_code' in df_redo.columns:
+    df_redo = df_redo.rename(columns={'farmer_code': 'Farmercode'})
+required = ['Farmercode', 'selectplot', 'polygonplot']
+if not all(c in df_redo.columns for c in required):
+    st.error("Redo Polygon Form must contain 'Farmercode', 'selectplot', 'polygonplot'.")
+    st.stop()
+
+# Merge latest redo per farmer
+if set(['SubmissionDate','endtime']).issubset(df_redo.columns):
+    df_redo['SubmissionDate'] = pd.to_datetime(df_redo['SubmissionDate'], errors='coerce')
+    df_redo['endtime'] = pd.to_datetime(df_redo['endtime'], errors='coerce')
+    df_redo = df_redo.sort_values(['SubmissionDate','endtime']).groupby('Farmercode', as_index=False).last()
+    df_redo = df_redo.rename(columns={'selectplot':'redo_selectplot','polygonplot':'redo_polygonplot'})
+    df = df.merge(df_redo[['Farmercode','redo_selectplot','redo_polygonplot']], on='Farmercode', how='left')
+    # apply
+    base_plot = 'polygonplot'
+    df.loc[df[base_plot].notna() & (df.redo_selectplot=='Plot1'), base_plot] = df.loc[df[base_plot].notna() & (df.redo_selectplot=='Plot1'), 'redo_polygonplot'].astype(str)
+    for col, val in zip(['polygonplotnew_1','polygonplotnew_2','polygonplotnew_3','polygonplotnew_4'], ['Plot2','Plot3','Plot4','Plot5']):
+        if col in df.columns:
+            mask = df[col].notna() & (df.redo_selectplot==val)
+            df.loc[mask, col] = df.loc[mask, 'redo_polygonplot'].astype(str)
+    df.drop(['redo_selectplot','redo_polygonplot'], axis=1, inplace=True)
 
 # ---------------------------
 # DATE FILTER
 # ---------------------------
-df['Submissiondate'] = pd.to_datetime(df.get('Submissiondate', df.get('SubmissionDate')), errors='coerce')
+if 'Submissiondate' in df.columns or 'SubmissionDate' in df.columns:
+    col = 'Submissiondate' if 'Submissiondate' in df.columns else 'SubmissionDate'
+    df['Submissiondate'] = pd.to_datetime(df[col], errors='coerce')
+else:
+    df['Submissiondate'] = pd.NaT
 if df['Submissiondate'].notna().any():
     mn, mx = df['Submissiondate'].min().date(), df['Submissiondate'].max().date()
-    sel = st.slider("Submission Date Range", mn, mx, (mn,mx))
-    df = df[df['Submissiondate'].dt.date.between(sel[0], sel[1])]
+    rng = st.slider("Submission Date Range", mn, mx, (mn,mx))
+    df = df[df['Submissiondate'].dt.date.between(rng[0], rng[1])]
 else:
-    st.warning("No submission dates found; skipping date filter.")
+    st.warning("No submission dates available; skipping date filter.")
 
 # ---------------------------
-# PARSE & COMBINE POLYGONS (Optimized)
+# POLYGON PARSING
 # ---------------------------
-def parse_poly(s):
+def parse_polygon(s):
     if not isinstance(s,str): return None
-    pts=[tuple(map(float,p.split()[:2])) for p in s.split(';') if len(p.split())>=2]
+    pts = [tuple(map(float,p.split()[:2])) for p in s.split(';') if len(p.split())>=3]
     return Polygon(pts) if len(pts)>=3 else None
-poly_cols=[c for c in df.columns if c.startswith('polygonplot')]
-for c in poly_cols:
-    df[c] = df[c].map(parse_poly)
-combined=[]
-for polys in df[poly_cols].itertuples(index=False):
-    valid=[p.buffer(0) if p and not p.is_valid else p for p in polys if p]
-    combined.append(unary_union(valid) if len(valid)>1 else (valid[0] if valid else None))
-df['geometry']=combined
-df = df[df['geometry'].notna()]
+
+def combine(row):
+    cols = [c for c in ['polygonplot','polygonplotnew_1','polygonplotnew_2','polygonplotnew_3','polygonplotnew_4'] if c in row]
+    polys = [parse_polygon(row[c]) for c in cols if pd.notna(row[c])]
+    valid=[]
+    for p in polys:
+        if p and not p.is_valid: p = p.buffer(0)
+        if p and p.is_valid: valid.append(p)
+    return valid[0] if len(valid)==1 else unary_union(valid) if valid else None
+
+# build GeoDataFrame
+df['geometry']=df.apply(combine,axis=1)
+df=df[df.geometry.notna()]
+gdf=gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326').to_crs('EPSG:2109')
+gdf.geometry=gdf.geometry.buffer(0)
+gdf=gdf[gdf.is_valid]
 
 # ---------------------------
-# GeoDataFrame & CRS
+# OVERLAP CHECK
 # ---------------------------
-gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326').to_crs('EPSG:2109')
-gdf['geometry'] = gdf['geometry'].buffer(0)
-gdf = gdf[gdf.is_valid]
+def check_overlaps(gdf, code):
+    tgt=gdf[gdf.Farmercode==code]
+    if tgt.empty: return [],0
+    poly=tgt.geometry.iloc[0]
+    total=poly.area
+    idxs=list(gdf.sindex.intersection(poly.bounds))
+    union=None; overlaps=[]
+    for i in idxs:
+        r=gdf.iloc[i]
+        if r.Farmercode==code: continue
+        if not poly.intersects(r.geometry): continue
+        inter=poly.intersection(r.geometry)
+        if inter.is_empty: continue
+        a=inter.area
+        overlaps.append({'Farmercode':r.Farmercode,'overlap_area':a,'total_area':total,'intersection':inter})
+        union=inter if union is None else union.union(inter)
+    pct=union.area/total*100 if union is not None else 0
+    return overlaps, pct
+
+overlap_dict={code: check_overlaps(gdf,code)[1] for code in gdf.Farmercode.unique()}
+gdf['overlap_pct']=gdf.Farmercode.map(overlap_dict)
 
 # ---------------------------
-# PRECOMPUTE OVERLAP %
+# NONCOMPLIANCE & METRICS
 # ---------------------------
-bounds_idx = gdf.sindex
-areas = gdf.geometry.area
-overlap_pct = {}
-for i,row in gdf.iterrows():
-    poly=row.geometry
-    ints=None
-    for j in bounds_idx.intersection(poly.bounds):
-        if i==j: continue
-        inter=poly.intersection(gdf.geometry.iat[j])
-        if inter.area>1e-6:
-            ints = inter if ints is None else ints.union(inter)
-    overlap_pct[row['Farmercode']] = (ints.area/areas.iat[i]*100) if ints is not None else 0
-gdf['overlap_pct'] = gdf['Farmercode'].map(overlap_pct)
+def compute_productive(row):
+    area=sum(float(row[c]) for c in row.index if 'acres_polygonplot' in c.lower() and pd.notna(row[c]) )
+    plants=sum(float(row[c]) for c in row.index if 'productiveplants' in c.lower() and pd.notna(row[c]))
+    exp=area*450; half=exp/2; pct125=exp*1.25
+    inc='';
+    if plants<half: inc='Less than Expected'
+    elif plants>pct125: inc='More than expected'
+    return area,plants,exp,half,pct125,inc
+
+def check_flag(cond): return cond
+
+def check_labour(row):
+    c=row.get; f= lambda x: str(c(x,'')).lower()
+    cond = f('childrenworkingconditions')=='any_time_when_needed' or f('prisoners')=='yes' or f('contractsworkers')=='no' or f('drinkingwaterworkers')=='no'
+    return cond, float(row.get('noncompliancesfound_Labour',0))
+def check_environment(row):
+    f=lambda x: str(row.get(x,'')).lower()
+    cond=f('cutnativetrees')=='yes' or f('cutforests')=='yes' or f('toiletdischarge')=='yes' or f('separatewaste')=='no'
+    return cond, float(row.get('noncompliancesfound_Environmental',0))
+def check_agro(row):
+    cols=['methodspestdiseasemanagement_using_chemicals','fertilizerchemicals_Pesticides','fertilizerchemicals_Fungicides','fertilizerchemicals_Herbicides','childrenlabouractivities_spraying_of_chemicals','typeworkvulnerable_Spraying_of_chemicals','agriculturalinputs_synthetic_chemicals_or_fertilize']
+    cond=any(float(row.get(c,0))==1 for c in cols)
+    return cond, float(row.get('noncompliancesfound_Agro_chemical',0))
+def check_agronomic(row):
+    cols=['pruning','desuckering','manageweeds','knowledgeIPM']
+    cond=any(str(row.get(c,'')).lower()=='no' for c in cols)
+    return cond, float(row.get('noncompliancesfound_Agronomic',0))
+def check_post(row):
+    cols=['ripepods','storedrycocoa','separatebasins']
+    cond=any(str(row.get(c,'')).lower()=='no' for c in cols)
+    return cond, float(row.get('noncompliancesfound_Harvest_and_postharvestt',0))
+def get_flags(row):
+    flags={}
+    # counts
+    area,plants,exp,half,pct125,inc=compute_productive(row)
+    fns=[('Labour',check_labour),('Environmental',check_environment),('Agro_chemical',check_agro),('Agronomic',check_agronomic),('PostHarvest',check_post)]
+    for name,fn in fns:
+        cond,found=fn(row)
+        flags[f'{name}_mismatch']= cond and found==0
+        flags[f'{name}_found']= found>0
+    flags['Productiveplants_flag']= plants>exp*1.25
+    # other checks
+    flags['ID_format_flag']= (str(row.get('IDtype','')).lower()=='national_id') and not str(row.get('IDnumber','')).startswith(('CM','CF'))
+    flags['children_vs_schoolaged_flag']= row.get('children',0) < row.get('schoolaged',0)
+    flags['attendingschool_vs_schoolaged_flag']= row.get('attendingschool',0) > row.get('schoolaged',0)
+    flags['kgsold_vs_totalharvest_flag']= row.get('kgsold',0) > row.get('totalharvest',0)
+    flags['sale_to_latitude_flag']= (row.get('salesmadeto_Latitude',0)==0) and row.get('kgsold',0)>0
+    flags['plot_vs_farm_flag']= row.get('acreage_totalplot',0) > row.get('total_acreage_farm',0)
+    flags['cocoa_vs_plot_flag']= row.get('cocoa_acreage',0) > row.get('acreage_totalplot',0)
+    flags['plot_diff_flag']= (row.get('acreage_totalplot',0) - row.get('total_acreage_farm',0))>=2
+    return flags
+
+# apply data cleaning flags
+dc_flags = pd.DataFrame(df.apply(get_flags, axis=1).tolist())
+merged = pd.concat([df.reset_index(drop=True), dc_flags], axis=1)
 
 # ---------------------------
-# PRODUCTIVE PLANTS METRICS
+# STREAMLIT UI and EXPORT
 # ---------------------------
-temp = df.filter(regex='(?i)acres_polygonplot').sum(axis=1)
-plants = df.filter(regex='(?i)productiveplants').sum(axis=1)
-expected = temp*450
-df['Total_Area']=temp
-df['Total_Productive_Plants']=plants
-df['Expected_Plants']=expected
-df['Half_Expected_Plants']=expected/2
-df['Pct125_Expected_Plants']=expected*1.25
-def prod_inconsistency(pl,exp):
-    if pl<exp/2: return 'Less than Expected'
-    if pl>exp*1.25: return 'More than Expected'
-    return ''
-df['Productive_Plants_Inconsistency'] = df.apply(lambda r: prod_inconsistency(r['Total_Productive_Plants'],r['Expected_Plants']), axis=1)
-
-# ---------------------------
-# NONCOMPLIANCE & RATING FUNCTIONS
-# ---------------------------
-def labour_registered(r): return any(
-    str(r.get(x,'')).strip().lower() in ['any_time_when_needed','yes','no']
-    for x in ['childrenworkingconditions','prisoners','contractsworkers','drinkingwaterworkers'])
-def check_labour_mismatch(r): return 'Labour-Noncompliance-Mismatch' if labour_registered(r) and r.get('noncompliancesfound_Labour',0)==0 else None
-def check_environmental_mismatch(r): return 'Environmental-Noncompliance-Mismatch' if (str(r.get('cutnativetrees','')).lower()=='yes' or str(r.get('cutforests','')).lower()=='yes' or str(r.get('toiletdischarge','')).lower()=='yes' or str(r.get('separatewaste','')).lower()=='no') and r.get('noncompliancesfound_Environmental',0)==0 else None
-def agro_registered(r):
-    for x in ['methodspestdiseasemanagement_using_chemicals','fertilizerchemicals_Pesticides','fertilizerchemicals_Fungicides','fertilizerchemicals_Herbicides','childrenlabouractivities_spraying_of_chemicals','typeworkvulnerable_Spraying_of_chemicals','agriculturalinputs_synthetic_chemicals_or_fertilize']:
-        try: 
-            if float(r.get(x,0))==1: return True
-        except: pass
-    return False
-def check_agrochemical_mismatch(r): return 'Agrochemical-Noncompliance-Mismatch' if agro_registered(r) and r.get('noncompliancesfound_Agro_chemical',0)==0 else None
-def agronomic_registered(r): return any(str(r.get(x,'')).lower()=='no' for x in ['pruning','desuckering','manageweeds','knowledgeIPM'])
-def check_agronomic_mismatch(r): return 'Agronomic-Noncompliance-Mismatch' if agronomic_registered(r) and r.get('noncompliancesfound_Agronomic',0)==0 else None
-def postharvest_registered(r): return any(str(r.get(x,'')).lower()=='no' for x in ['ripepods','storedrycocoa','separatebasins'])
-def check_postharvest_mismatch(r): return 'PostHarvest-Noncompliance-Mismatch' if postharvest_registered(r) and r.get('noncompliancesfound_Harvest_and_postharvestt',0)==0 else None
-def check_phone_mismatch(r): return 'Phone number mismatch' if str(r.get('phone_match','')).lower()!='match' else None
-def check_time_inconsistency(r): return 'Time inconsistency' if float(r.get('duration',0))<900 else None
-def get_inconsistency_flags(r):
-    flags={
-        'Labour_Advice':check_labour_mismatch(r) or 'None',
-        'Environmental_Advice':check_environmental_mismatch(r) or 'None',
-        'Agrochemical_Advice':check_agrochemical_mismatch(r) or 'None',
-        'Agronomic_Advice':check_agronomic_mismatch(r) or 'None',
-        'PostHarvest_Advice':check_postharvest_mismatch(r) or 'None',
-        'Phone_Advice':check_phone_mismatch(r) or 'None',
-        'Time_Advice':check_time_inconsistency(r) or 'None',
-        'Overlap_Advice': (f"Overlap {overlap_pct.get(r['Farmercode'],0):.2f}%") if overlap_pct.get(r['Farmercode'],0)>=5 else 'None'
-    }
-    flags.update({
-        'Total_Area':r['Total_Area'],'Total_Productive_Plants':r['Total_Productive_Plants'],'Expected_Plants':r['Expected_Plants'],
-        'Half_Expected_Plants':r['Half_Expected_Plants'],'Pct125_Expected_Plants':r['Pct125_Expected_Plants'],'Productive_Plants_Inconsistency':r['Productive_Plants_Inconsistency']
-    })
-    return pd.Series(flags)
-def compute_rating(r):
-    s=0
-    s+=1 if str(r.get('phone_match','')).lower()=='match' else 0
-    s+=1 if r.get('duration',0)>900 else 0
-    try: s+=1 if r['kgsold']<=r['harvestflyseason']+r['totalharvest'] else 0
-    except: pass
-    s+=1 if r.get('acreagetotalplot',0)<r.get('cocoaacreage',0) else 0
-    try: s+=1 if r['Productiveplants']>=(r['youngplants']+r['stumpedplants']+r['shadeplants']) else 0
-    except: pass
-    s+=1 if not(labour_registered(r) and r.get('noncompliancesfound_Labour',0)==0) else 0
-    s+=1 if not((str(r.get('cutnativetrees','')).lower()=='yes') and r.get('noncompliancesfound_Environmental',0)==0) else 0
-    s+=1 if not(agro_registered(r) and r.get('noncompliancesfound_Agro_chemical',0)==0) else 0
-    s+=1 if not(agronomic_registered(r) and r.get('noncompliancesfound_Agronomic',0)==0) else 0
-    s+=1 if not(postharvest_registered(r) and r.get('noncompliancesfound_Harvest_and_postharvestt',0)==0) else 0
-    s+=1 if r['Productive_Plants_Inconsistency']=='' else 0
-    s+=1 if overlap_pct.get(r['Farmercode'],0)<5 else 0
-    return s
-df['total_rating']=df.apply(compute_rating,axis=1)
-
-# ---------------------------
-# BEST INSPECTORS CHART
-# ---------------------------
-inspector_rating = df.groupby('username')['total_rating'].mean().reset_index()
-if 'district' in df.columns:
-    sel_dist=st.selectbox('Select District',['All']+sorted(df['district'].dropna().unique()))
-    if sel_dist!='All':
-        inspector_rating=df[df['district']==sel_dist].groupby('username')['total_rating'].mean().reset_index()
-fig, ax = plt.subplots(figsize=(8,4))
-best=inspector_rating.sort_values('total_rating',ascending=False).head(10)
-ax.bar(best['username'],best['total_rating'])
-ax.set_xticklabels(best['username'],rotation=45,ha='right')
-st.pyplot(fig)
-
-# ---------------------------
-# FARMER INCONSISTENCY DISPLAY & MAP
-# ---------------------------
-agg = pd.concat([df.apply(lambda r: pd.Series(get_inconsistency_flags(r)),axis=1), df[['Farmercode','username']]], axis=1)
-agg['Risk'] = agg.drop(columns=['Farmercode','username']).apply(lambda x: 'High' if any('Mismatch' in str(v) for v in x) else 'Low', axis=1)
-agg_summary = agg.groupby(['Farmercode','username'], as_index=False).agg({'Risk':'max'})
-farmer_list = gdf['Farmercode'].unique().tolist()
-sel_farmer = st.selectbox('Select Farmer', farmer_list)
-sub = agg_summary[agg_summary['Farmercode']==sel_farmer]
-st.subheader(f"Inconsistencies for {sel_farmer}")
-if not sub.empty:
-    st.table(sub)
-else:
-    st.write("No inconsistencies detected.")
-
-row = gdf[gdf['Farmercode']==sel_farmer]
-if not row.empty:
-    st.subheader("Overlap Map")
-    base = row.geometry.plot(alpha=0.5, figsize=(6,6))
-    for code, pct in overlap_pct.items():
-        if code!=sel_farmer and pct>0:
-            gdf[gdf['Farmercode']==code].geometry.plot(ax=base, alpha=0.3)
-    st.pyplot(base.get_figure())
-
-# ---------------------------
-# EXPORT FUNCTION
-# ---------------------------
-def export_data():
-    export_df = df.copy()
-    flags = export_df.apply(lambda r: get_inconsistency_flags(r), axis=1)
-    export_df = pd.concat([export_df, flags], axis=1)
-    export_df['overlap_pct'] = export_df['Farmercode'].map(overlap_pct)
-    # cleaning flags
-    export_df['number_fields_flag']=export_df['number_fields']>5
-    export_df['acreage_farm_vs_cocoa_flag']=(export_df['total_acreage_farm']<export_df['total_acreage_cocoa'])|(export_df['total_acreage_farm']>20)|(export_df['total_acreage_cocoa']>20)
-    export_df['ID_format_flag']=(export_df['IDtype'].str.lower()=='national_id')&(~export_df['IDnumber'].str.startswith(('CM','CF')))
-    export_df['children_vs_schoolaged_flag']=export_df['children']<export_df['schoolaged']
-    export_df['attendingschool_vs_schoolaged_flag']=export_df['attendingschool']>export_df['schoolaged']
-    export_df['kgsold_vs_totalharvest_flag']=export_df['kgsold']>export_df['totalharvest']
-    export_df['sale_to_latitude_flag']=(export_df['salesmadeto_Latitude']==0)&(export_df['kgsold']>0)
-    export_df['plot_acreage_vs_farm_flag']=export_df['acreage_totalplot']>export_df['total_acreage_farm']
-    export_df['cocoa_acreage_vs_plot_flag']=export_df['cocoa_acreage']>export_df['acreage_totalplot']
-    export_df['productiveplants_vs_expected_flag']=export_df['Total_Productive_Plants']>1.25*export_df['Total_Area']*450
-    export_df['plot_vs_farm_diff_flag']=(export_df['acreage_totalplot']-export_df['total_acreage_farm'])>=2
-    export_df['noncompliance_without_advice_flag']=((export_df['noncompliancesfound_Labour']>0)&(export_df['Labour_Advice']=='None'))|((export_df['noncompliancesfound_Environmental']>0)&(export_df['Environmental_Advice']=='None'))
-    export_df['agrochemical_violations_flag']=export_df['noncompliancesfound_Agro_chemical']>0
-
+def to_excel(df):
     buf=io.BytesIO()
-    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-        export_df.to_excel(writer, index=False, sheet_name='Results')
+    with pd.ExcelWriter(buf, engine='xlsxwriter') as w:
+        df.to_excel(w, index=False, sheet_name='Cleaned')
     buf.seek(0)
-    st.download_button("Download Full Report", buf, "inspection_report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return buf
 
-if st.button('Export Full Report'):
-    export_data()
+st.subheader("Data Cleaning Flags Preview")
+st.dataframe(merged.iloc[:100])
+
+if st.button("Download Cleaned Data"):
+    buf = to_excel(merged)
+    st.download_button("Download Excel", data=buf, file_name='cleaned_inspection.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
