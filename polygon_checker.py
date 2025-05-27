@@ -223,6 +223,7 @@ def check_labour_mismatch(row):
         found = float(row.get("noncompliancesfound_Labour", 0))
     except:
         found = 0
+    # Award point (i.e. no penalty) if either no labour issue is flagged or if flagged and noncompliance recorded.
     return "Labour-Noncompliance-Mismatch" if labour_Registered(row) and found == 0 else None
 
 def check_environmental_mismatch(row):
@@ -371,6 +372,7 @@ else:
 # ---------------------------
 def compute_rating(row):
     score = 0
+    # Basic Conditions (contract and receipts removed)
     if str(row.get("phone_match", "")).strip().lower() == "match":
         score += 1
     if row.get("duration", 0) > 900:
@@ -393,18 +395,21 @@ def compute_rating(row):
     if pd.notnull(productiveplants):
         if productiveplants >= (youngplants + stumpedplants + shadeplants):
             score += 1
+    # Labour Noncompliance: reward if either no flag OR if flagged and noncompliance recorded
     labour_flag = (str(row.get("childrenworkingconditions", "")).strip().lower() == "any_time_when_needed" or
                    str(row.get("prisoners", "")).strip().lower() == "yes" or
                    str(row.get("contractsworkers", "")).strip().lower() == "no" or
                    str(row.get("drinkingwaterworkers", "")).strip().lower() == "no")
     if not (labour_flag and (row.get("noncompliancesfound_Labour", 0) == 0)):
         score += 1
+    # Environmental Noncompliance
     env_flag = (str(row.get("cutnativetrees", "")).strip().lower() == "yes" or
                 str(row.get("cutforests", "")).strip().lower() == "yes" or
                 str(row.get("toiletdischarge", "")).strip().lower() == "yes" or
                 str(row.get("separatewaste", "")).strip().lower() == "no")
     if not (env_flag and (row.get("noncompliancesfound_Environmental", 0) == 0)):
         score += 1
+    # Agrochemical Noncompliance
     agro_columns = ["methodspestdiseasemanagement_using_chemicals",
                     "fertilizerchemicals_Pesticides",
                     "fertilizerchemicals_Fungicides",
@@ -422,14 +427,17 @@ def compute_rating(row):
             pass
     if not (agro_flag and (row.get("noncompliancesfound_Agro_chemical", 0) == 0)):
         score += 1
+    # Agronomic Noncompliance
     agronomic_columns = ["pruning", "desuckering", "manageweeds", "knowledgeIPM"]
     if not (any(str(row.get(col, "")).strip().lower() == "no" for col in agronomic_columns) and 
             (row.get("noncompliancesfound_Agronomic", 0) == 0)):
         score += 1
+    # Postharvest Noncompliance
     postharvest_columns = ["ripepods", "storedrycocoa", "separatebasins"]
     if not (any(str(row.get(col, "")).strip().lower() == "no" for col in postharvest_columns) and
             (row.get("noncompliancesfound_Harvest_and_postharvestt", 0) == 0)):
         score += 1
+    # Productive Plants Inconsistency
     total_area = 0
     total_productive_plants = 0
     for col in row.index:
@@ -446,6 +454,7 @@ def compute_rating(row):
     expected_plants = total_area * 450
     if total_productive_plants <= 1.25 * expected_plants:
         score += 1
+    # Polygon Overlap: award extra point if overlap is less than 5%
     farmer = row.get("Farmercode")
     if pd.notnull(farmer):
         _, overall_pct = check_overlaps(gdf, farmer)
@@ -453,9 +462,11 @@ def compute_rating(row):
             score += 1
     return score
 
+# Compute total_rating for each inspection record
 df["total_rating"] = df.apply(compute_rating, axis=1)
 inspector_rating = df.groupby('username')["total_rating"].mean().reset_index()
 
+# District filtering for best inspectors if available
 if "district" in df.columns:
     districts = sorted(df["district"].dropna().unique().tolist())
     selected_district = st.selectbox("Select District", ["All Districts"] + districts)
@@ -522,155 +533,14 @@ if not target_row.empty:
         st.pyplot(fig)
 
 # ---------------------------
-# DATA CLEANING FLAGS FUNCTION
-# ---------------------------
-def get_float(value):
-    """Convert a value to float, returning NaN if conversion fails."""
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return float('nan')
-
-def get_data_cleaning_flags(row):
-    """Generate flags for data cleaning issues."""
-    flags = {}
-    
-    # Check 2: ‘number_fields’ Not more than 5
-    number_fields = get_float(row.get('number_fields'))
-    if pd.notnull(number_fields) and number_fields > 5:
-        flags['DataCleaning_number_fields_exceeds_5'] = "Number of fields exceeds 5"
-    else:
-        flags['DataCleaning_number_fields_exceeds_5'] = ""
-    
-    # Check 3: ‘total_acreage_farm’ >= ‘total_acreage_cocoa’, both <= 20 acres
-    total_acreage_farm = get_float(row.get('total_acreage_farm'))
-    total_acreage_cocoa = get_float(row.get('total_acreage_cocoa'))
-    if pd.notnull(total_acreage_farm) and pd.notnull(total_acreage_cocoa):
-        if total_acreage_farm < total_acreage_cocoa:
-            flags['DataCleaning_acreage_farm_less_than_cocoa'] = "Total acreage farm less than total acreage cocoa"
-        elif total_acreage_farm > 20:
-            flags['DataCleaning_total_acreage_farm_exceeds_20'] = "Total acreage farm exceeds 20 acres"
-        elif total_acreage_cocoa > 20:
-            flags['DataCleaning_total_acreage_cocoa_exceeds_20'] = "Total acreage cocoa exceeds 20 acres"
-        else:
-            flags['DataCleaning_acreage_farm_less_than_cocoa'] = ""
-            flags['DataCleaning_total_acreage_farm_exceeds_20'] = ""
-            flags['DataCleaning_total_acreage_cocoa_exceeds_20'] = ""
-    else:
-        flags['DataCleaning_acreage_farm_less_than_cocoa'] = ""
-        flags['DataCleaning_total_acreage_farm_exceeds_20'] = ""
-        flags['DataCleaning_total_acreage_cocoa_exceeds_20'] = ""
-    
-    # Check 4: If ‘IDtype’ is ‘national_id’, then ‘IDnumber’ should start with 'CM' or 'CF'
-    id_type = str(row.get('IDtype', '')).strip().lower()
-    id_number = str(row.get('IDnumber', '')).strip().upper()
-    if id_type == 'national_id' and not (id_number.startswith('CM') or id_number.startswith('CF')):
-        flags['DataCleaning_invalid_id_number'] = "ID number does not start with CM or CF for national ID"
-    else:
-        flags['DataCleaning_invalid_id_number'] = ""
-    
-    # Check 5: ‘children’ >= ‘schoolaged’
-    children = get_float(row.get('children'))
-    schoolaged = get_float(row.get('schoolaged'))
-    if pd.notnull(children) and pd.notnull(schoolaged) and children < schoolaged:
-        flags['DataCleaning_children_less_than_schoolaged'] = "Number of children less than school-aged children"
-    else:
-        flags['DataCleaning_children_less_than_schoolaged'] = ""
-    
-    # Check 6: ‘attendingschool’ <= ‘schoolaged’
-    attendingschool = get_float(row.get('attendingschool'))
-    if pd.notnull(attendingschool) and pd.notnull(schoolaged) and attendingschool > schoolaged:
-        flags['DataCleaning_attendingschool_exceeds_schoolaged'] = "Number attending school exceeds school-aged children"
-    else:
-        flags['DataCleaning_attendingschool_exceeds_schoolaged'] = ""
-    
-    # Check 7: ‘kgsold’ <= ‘totalharvest’
-    kgsold = get_float(row.get('kgsold'))
-    totalharvest = get_float(row.get('totalharvest'))
-    if pd.notnull(kgsold) and pd.notnull(totalharvest) and kgsold > totalharvest:
-        flags['DataCleaning_kgsold_exceeds_totalharvest'] = "KG sold exceeds total harvest"
-    else:
-        flags['DataCleaning_kgsold_exceeds_totalharvest'] = ""
-    
-    # Check 8: If ‘salesmadeto_Latitude’ == 0, then ‘kgsold’ <= 0
-    salesmadeto_latitude = get_float(row.get('salesmadeto_Latitude'))
-    if pd.notnull(salesmadeto_latitude) and salesmadeto_latitude == 0 and pd.notnull(kgsold) and kgsold > 0:
-        flags['DataCleaning_kgsold_with_no_sales_to_latitude'] = "KG sold reported but no sales to Latitude"
-    else:
-        flags['DataCleaning_kgsold_with_no_sales_to_latitude'] = ""
-    
-    # Check 9: ‘acreagetotalplot’ <= ‘total_acreage_farm’
-    # Note: Assuming 'acreage_totalplot' in the query is meant to be 'acreagetotalplot' as used elsewhere
-    acreagetotalplot = get_float(row.get('acreagetotalplot'))
-    if pd.notnull(acreagetotalplot) and pd.notnull(total_acreage_farm) and acreagetotalplot > total_acreage_farm:
-        flags['DataCleaning_acreagetotalplot_exceeds_total_acreage_farm'] = "Acreage total plot exceeds total acreage farm"
-    else:
-        flags['DataCleaning_acreagetotalplot_exceeds_total_acreage_farm'] = ""
-    
-    # Check 10: ‘cocoa_acreage’ <= ‘acreagetotalplot’
-    cocoa_acreage = get_float(row.get('cocoa_acreage'))
-    if pd.notnull(cocoa_acreage) and pd.notnull(acreagetotalplot) and cocoa_acreage > acreagetotalplot:
-        flags['DataCleaning_cocoa_acreage_exceeds_acreagetotalplot'] = "Cocoa acreage exceeds acreage total plot"
-    else:
-        flags['DataCleaning_cocoa_acreage_exceeds_acreagetotalplot'] = ""
-    
-    # Check 11: ‘Productiveplants’ vs. ‘total_acreage_farm’, flag if > 125% of 450 plants/acre
-    productive_plants_cols = [col for col in row.index if 'productiveplants' in col.lower()]
-    total_productive_plants = sum([get_float(row[col]) for col in productive_plants_cols])
-    if pd.notnull(total_acreage_farm):
-        expected_plants = total_acreage_farm * 450
-        if total_productive_plants > 1.25 * expected_plants:
-            flags['DataCleaning_productive_plants_exceed_expected'] = "Productive plants exceed 125% of expected"
-        else:
-            flags['DataCleaning_productive_plants_exceed_expected'] = ""
-    else:
-        flags['DataCleaning_productive_plants_exceed_expected'] = ""
-    
-    # Check 12: ‘acreagetotalplot’ > ‘total_acreage_farm’ by more than 2 acres
-    if pd.notnull(acreagetotalplot) and pd.notnull(total_acreage_farm) and acreagetotalplot > total_acreage_farm + 2:
-        flags['DataCleaning_acreagetotalplot_exceeds_total_acreage_farm_by_2'] = "Acreage total plot exceeds total acreage farm by more than 2 acres"
-    else:
-        flags['DataCleaning_acreagetotalplot_exceeds_total_acreage_farm_by_2'] = ""
-    
-    # Check 13: Non-compliance observed but no advice given
-    # Note: Exact advice columns are not specified; assuming mismatch indicates no advice
-    noncompliance_areas = {
-        'Agro_chemical': check_agrochemical_mismatch(row),
-        'Harvest_and_postharvestt': check_postharvest_mismatch(row),
-        'Agronomic': check_agronomic_mismatch(row),
-        'Environmental': check_environmental_mismatch(row),
-        'Labour': check_labour_mismatch(row)
-    }
-    noncompliance_no_advice = [area for area, mismatch in noncompliance_areas.items() if mismatch]
-    if noncompliance_no_advice:
-        flags['DataCleaning_noncompliance_no_advice'] = f"Non-compliance observed but no advice given in: {', '.join(noncompliance_no_advice)}"
-    else:
-        flags['DataCleaning_noncompliance_no_advice'] = ""
-    
-    # Check 14: Agro-chemical violations
-    noncompliancesfound_agro_chemical = get_float(row.get('noncompliancesfound_Agro_chemical'))
-    if pd.notnull(noncompliancesfound_agro_chemical) and noncompliancesfound_agro_chemical > 0:
-        flags['DataCleaning_agro_chemical_violation'] = "Agro-chemical violation found"
-    else:
-        flags['DataCleaning_agro_chemical_violation'] = ""
-    
-    return pd.Series(flags)
-
-# ---------------------------
-# EXPORT FUNCTION
+# EXPORT FUNCTION (with total_rating & average_rating_per_username columns)
 # ---------------------------
 def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     export_df = df.copy()
-    # Add existing inconsistency flags
     flags = export_df.apply(lambda row: pd.Series(get_inconsistency_flags(row)), axis=1)
     export_df = pd.concat([export_df, flags], axis=1)
-    # Add data cleaning flags
-    data_cleaning_flags = export_df.apply(get_data_cleaning_flags, axis=1)
-    export_df = pd.concat([export_df, data_cleaning_flags], axis=1)
-    # Add geometry-related columns
     export_df['Acres'] = gpd.GeoSeries(export_df['geometry'], crs=gdf.crs).area * 0.000247105
     export_df['geometry'] = export_df['geometry'].apply(lambda geom: geom.wkt)
-    # Merge with aggregated inconsistencies
     merged_df = export_df.merge(
         agg_incons_df[['Farmercode', 'username', 'inconsistency', 'Risk Rating', 'Trust Responses']],
         on=['Farmercode', 'username'], how='left'
@@ -678,12 +548,11 @@ def export_with_inconsistencies_merged(main_gdf, agg_incons_df):
     merged_df['inconsistency'] = merged_df['inconsistency'].fillna("No Inconsistency")
     merged_df['Risk Rating'] = merged_df['Risk Rating'].fillna("None")
     merged_df['Trust Responses'] = merged_df['Trust Responses'].fillna("Yes")
-    # Add rating columns
+    # Recalculate the rating per row and merge average rating per inspector
     merged_df["total_rating"] = merged_df.apply(compute_rating, axis=1)
     avg_rating = merged_df.groupby('username')["total_rating"].mean().reset_index().rename(columns={"total_rating": "average_rating_per_username"})
     merged_df = merged_df.merge(avg_rating, on='username', how='left')
     
-    # Export to Excel
     towrite = io.BytesIO()
     with pd.ExcelWriter(towrite, engine="xlsxwriter") as writer:
         merged_df.to_excel(writer, index=False, sheet_name="Updated Form")
