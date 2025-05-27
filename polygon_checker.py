@@ -40,7 +40,7 @@ if 'Farmercode' not in df.columns or 'polygonplot' not in df.columns:
     st.stop()
 
 # Load redo file
-t ry:
+try:
     if redo_file.name.endswith('.xlsx'):
         df_redo = pd.read_excel(redo_file, engine='openpyxl')
     else:
